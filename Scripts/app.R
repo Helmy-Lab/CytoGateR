@@ -6,6 +6,9 @@ library(uwot)
 library(data.table)
 library(shinycssloaders)  # For loading spinners
 
+# Increase file upload size to 100 MB
+options(shiny.maxRequestSize = 100*1024^2)
+
 # Simple arcsinh transformation function
 asinhTransform <- function(x, cofactor = 5) {
   asinh(x / cofactor)
@@ -205,8 +208,4 @@ server <- function(input, output, session) {
   })
 }
 
-shinyApp(ui = ui, server = server, 
-         options = list(
-           shiny.maxRequestSize = 500 * 1024^2,  # 500MB limit
-           shiny.launch.browser = TRUE
-         ))
+shinyApp(ui = ui, server = server)
