@@ -14,7 +14,7 @@ asinhTransform <- function(x, cofactor = 5) {
 }
 
 ui <- fluidPage(
-  titlePanel("Flow Cytometry: t-SNE & UMAP Dimensionality Reduction"),
+  titlePanel("Flow Cytometry: Dimensionality Reduction for Raw Data"),
   
   sidebarLayout(
     sidebarPanel(
@@ -27,8 +27,8 @@ ui <- fluidPage(
       sliderInput("n_neighbors", "UMAP n_neighbors", min = 2, max = 100, value = 15),
       checkboxGroupInput("methods", "Select Dimensionality Reduction Methods", choices = c("t-SNE", "UMAP"), selected = c("t-SNE", "UMAP")),
       selectInput("colorBy", "Color points by:", choices = c("None")),
-      sliderInput("plotHeight", "Plot height (px)", min = 400, max = 1000, value = 600),
-      sliderInput("plotWidth", "Plot width (px)", min = 400, max = 1000, value = 800),
+      sliderInput("plotHeight", "Plot height (px)", min = 300, max = 1200, value = 600, step = 50),
+      sliderInput("plotWidth", "Plot width (px)", min = 300, max = 1200, value = 600, step = 50),
       actionButton("run", "Run Analysis", class = "btn-primary")
     ),
     
