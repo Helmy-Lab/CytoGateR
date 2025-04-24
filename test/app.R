@@ -23,8 +23,343 @@ library(igraph)
 # devtools::install_github("JinmiaoChenLab/Rphenograph")
 # install.packages("FlowSOM")
 
+# Load additional preprocessing libraries
+library(flowAI)
+library(flowDensity)
+suppressPackageStartupMessages(library(openCyto))
+suppressPackageStartupMessages(library(flowClust))
+library(flowMatch)
 
 options(shiny.maxRequestSize = 250*1024^2)
+
+# ----------------- MODULAR PREPROCESSING PIPELINE -----------------
+
+# Data loading function
+loadFlowData <- function(file_path, file_name) {
+  ext <- tools::file_ext(file_name)
+  
+  # Load data based on file extension
+  data <- switch(ext,
+                 "fcs" = read.FCS(file_path, transformation = FALSE),
+                 "csv" = fread(file_path),
+                 "tsv" = fread(file_path, sep = "\t"),
+                 stop("Unsupported file format")
+  )
+  
+  return(list(
+    data = data,
+    file_name = file_name,
+    ext = ext
+  ))
+}
+
+# Quality control function
+performQC <- function(flow_data, qc_settings = list()) {
+  # Default settings
+  default_settings <- list(
+    remove_margins = TRUE,
+    min_cells = 100,
+    max_anomalies = 0.1
+  )
+  
+  # Merge with user-provided settings
+  settings <- modifyList(default_settings, qc_settings)
+  
+  # Apply QC only for FCS files
+  if (inherits(flow_data, "flowFrame")) {
+    # Get initial cell count
+    initial_count <- nrow(flow_data)
+    
+    # Apply flowAI QC
+    tryCatch({
+      qc_result <- flow_auto_qc(
+        flow_data,
+        alpha = 0.01
+      )
+      
+      # Check if enough cells remain
+      if (nrow(qc_result) < settings$min_cells) {
+        warning("QC removed too many cells. Using original data.")
+        qc_result <- flow_data
+      }
+      
+      # Calculate percent removed
+      removed_pct <- 1 - (nrow(qc_result) / initial_count)
+      
+      # If too many anomalies were found, use original data
+      if (removed_pct > settings$max_anomalies) {
+        warning(sprintf("QC found too many anomalies (%.1f%%). Using original data.", removed_pct * 100))
+        qc_result <- flow_data
+      }
+      
+      return(list(
+        data = qc_result,
+        metrics = list(
+          initial_count = initial_count,
+          final_count = nrow(qc_result),
+          removed_pct = removed_pct
+        )
+      ))
+    }, error = function(e) {
+      warning("QC process failed: ", e$message, ". Using original data.")
+      return(list(
+        data = flow_data,
+        metrics = list(
+          initial_count = initial_count,
+          final_count = initial_count,
+          removed_pct = 0,
+          error = e$message
+        )
+      ))
+    })
+  } else {
+    # For non-FCS data, return as is
+    return(list(
+      data = flow_data, 
+      metrics = list(
+        initial_count = nrow(flow_data),
+        final_count = nrow(flow_data),
+        removed_pct = 0,
+        message = "QC not applicable for non-FCS files"
+      )
+    ))
+  }
+}
+
+# Gating function to remove debris and dead cells
+performGating <- function(flow_data, gates = list()) {
+  # Default gates
+  default_gates <- list(
+    debris_gate = c("FSC-A", "SSC-A"),
+    live_dead_gate = NULL
+  )
+  
+  # Merge with user-provided gates
+  gates <- modifyList(default_gates, gates)
+  
+  # Apply gating only for FCS files
+  if (inherits(flow_data, "flowFrame")) {
+    # Track cell counts
+    initial_count <- nrow(flow_data)
+    gated_data <- flow_data
+    
+    # Apply debris gate if parameters exist
+    if (!is.null(gates$debris_gate) && 
+        all(gates$debris_gate %in% colnames(flow_data@exprs))) {
+      
+      # Create a debris gate using flowDensity
+      tryCatch({
+        # Get FSC and SSC parameters
+        fsc_param <- gates$debris_gate[1]
+        ssc_param <- gates$debris_gate[2]
+        
+        # Create a simple rectangular gate to remove very low FSC/SSC events
+        debris_gate <- rectangleGate(
+          filterId = "Debris",
+          fsc_param = c(100, Inf),
+          ssc_param = c(50, Inf)
+        )
+        names(debris_gate@min) <- c(fsc_param, ssc_param)
+        names(debris_gate@max) <- c(fsc_param, ssc_param)
+        
+        # Create proper gate structure for debris
+        gate_ranges <- list(
+          c(100, Inf),  # FSC range
+          c(50, Inf)    # SSC range
+        )
+        names(gate_ranges) <- c(fsc_param, ssc_param)
+        
+        debris_gate <- rectangleGate(
+          gate_ranges,
+          filterId = "Debris"
+        )
+        
+        # Apply gate
+        gated_data <- Subset(gated_data, debris_gate)
+      }, error = function(e) {
+        warning("Debris gating failed: ", e$message)
+      })
+    }
+    
+    # Apply live/dead gate if parameter exists
+    if (!is.null(gates$live_dead_gate) && 
+        gates$live_dead_gate %in% colnames(flow_data@exprs)) {
+      
+      tryCatch({
+        # Create a threshold gate for live cells (lower viability dye)
+        # Create gate with proper syntax 
+        gate_ranges <- list(c(-Inf, 1000))  # Threshold value, adjust as needed
+        names(gate_ranges) <- gates$live_dead_gate
+        
+        live_gate <- rectangleGate(
+          gate_ranges,
+          filterId = "Live"
+        )
+        
+        # Apply gate
+        gated_data <- Subset(gated_data, live_gate)
+      }, error = function(e) {
+        warning("Live/dead gating failed: ", e$message)
+      })
+    }
+    
+    # Calculate gating results
+    final_count <- nrow(gated_data)
+    removed_pct <- 1 - (final_count / initial_count)
+    
+    return(list(
+      data = gated_data,
+      metrics = list(
+        initial_count = initial_count,
+        final_count = final_count,
+        removed_pct = removed_pct
+      )
+    ))
+  } else {
+    # For non-FCS data, return as is
+    return(list(
+      data = flow_data, 
+      metrics = list(
+        initial_count = nrow(flow_data),
+        final_count = nrow(flow_data),
+        removed_pct = 0,
+        message = "Gating not applicable for non-FCS files"
+      )
+    ))
+  }
+}
+
+# Transform data function
+transformData <- function(flow_data, markers, transform = TRUE, cofactor = 5) {
+  # Extract expression data
+  if (inherits(flow_data, "flowFrame")) {
+    exprs_data <- exprs(flow_data)[, markers, drop = FALSE]
+  } else {
+    exprs_data <- as.matrix(flow_data[, markers, drop = FALSE])
+  }
+  
+  # Apply transformation if requested
+  if (transform) {
+    transformed_data <- apply(exprs_data, 2, asinhTransform, cofactor = cofactor)
+  } else {
+    transformed_data <- exprs_data
+  }
+  
+  return(transformed_data)
+}
+
+# Down-sampling function
+sampleCells <- function(data, n_events, seed = 123) {
+  set.seed(seed)
+  n_rows <- nrow(data)
+  
+  if (n_rows <= n_events) {
+    return(list(
+      data = data,
+      indices = 1:n_rows
+    ))
+  }
+  
+  # Sample indices
+  sampled_indices <- sample(n_rows, n_events)
+  sampled_data <- data[sampled_indices, ]
+  
+  return(list(
+    data = sampled_data,
+    indices = sampled_indices
+  ))
+}
+
+# Main preprocessing pipeline function
+preprocessFlowData <- function(input_data, preprocessing_params = list()) {
+  # Default parameters
+  default_params <- list(
+    markers = NULL,  # Must be provided
+    transform = TRUE,
+    cofactor = 5,
+    n_events = 5000,
+    perform_qc = TRUE,
+    perform_gating = TRUE,
+    scale_data = TRUE,
+    qc_settings = list(),
+    gates = list(),
+    seed = 123
+  )
+  
+  # Merge with user-provided parameters
+  params <- modifyList(default_params, preprocessing_params)
+  
+  # Check for required parameters
+  if (is.null(params$markers)) {
+    stop("Markers must be provided for preprocessing")
+  }
+  
+  # Initialize results tracking
+  results <- list(
+    raw_data = input_data,
+    metrics = list()
+  )
+  
+  # Step 1: Quality Control
+  if (params$perform_qc) {
+    qc_result <- performQC(input_data, params$qc_settings)
+    results$qc_data <- qc_result$data
+    results$metrics$qc <- qc_result$metrics
+  } else {
+    results$qc_data <- input_data
+  }
+  
+  # Step 2: Gating
+  if (params$perform_gating) {
+    gating_result <- performGating(results$qc_data, params$gates)
+    results$gated_data <- gating_result$data
+    results$metrics$gating <- gating_result$metrics
+  } else {
+    results$gated_data <- results$qc_data
+  }
+  
+  # Step 3: Transform data
+  transformed_data <- transformData(
+    results$gated_data, 
+    params$markers, 
+    params$transform, 
+    params$cofactor
+  )
+  results$transformed_data <- transformed_data
+  
+  # Step 4: Sample cells
+  sampled_result <- sampleCells(transformed_data, params$n_events, params$seed)
+  results$sampled_data <- sampled_result$data
+  results$sampled_indices <- sampled_result$indices
+  
+  # Step 5: Scale data
+  if (params$scale_data) {
+    results$scaled_data <- scale(results$sampled_data)
+  } else {
+    results$scaled_data <- results$sampled_data
+  }
+  
+  return(results)
+}
+
+# Function to apply preprocessing to both control and treated samples for comparison
+preprocessComparisonData <- function(control_data, treated_data, preprocessing_params = list()) {
+  # Preprocess each dataset
+  control_results <- preprocessFlowData(control_data, preprocessing_params)
+  treated_results <- preprocessFlowData(treated_data, preprocessing_params)
+  
+  # Combine the results
+  comparison_results <- list(
+    control = control_results,
+    treated = treated_results,
+    metrics = list(
+      control = control_results$metrics,
+      treated = treated_results$metrics
+    )
+  )
+  
+  return(comparison_results)
+}
 
 asinhTransform <- function(x, cofactor = 5) {
   asinh(x / cofactor)
@@ -32,8 +367,64 @@ asinhTransform <- function(x, cofactor = 5) {
 
 ui <- fluidPage(
   theme = shinytheme("flatly"),
-  titlePanel("Flow Cytometry Analysis Tool"),
+  tags$head(
+    tags$script("$(document).on('shiny:connected', function() { 
+      Shiny.setInputValue('showBatchClustering', true);
+      Shiny.setInputValue('showBatchPreprocessing', false);
+      Shiny.setInputValue('showBatchAdvancedCluster', false);
+    });"),
+    tags$style(HTML("
+      /* Improve readability of all plot text */
+      .plotly text, .ggplot text, .plot text {
+        font-family: 'Arial', sans-serif !important;
+      }
+      /* Add some spacing between UI elements */
+      .well { margin-bottom: 15px; }
+      /* Ensure consistent widths for buttons */
+      .action-button { width: 100%; }
+    "))
+  ),
   
+  titlePanel("Flow Cytometry Analysis Tool"),
+
+  # --- Application Settings ---
+  tabPanel("Application Settings",
+    fluidRow(
+      column(4,
+        wellPanel(
+          h4("Global Plot Settings", style = "text-align: center; font-weight: bold;"),
+          
+          sliderInput("global_plot_width", "Plot Width", 
+                      min = 300, max = 1200, value = 800, step = 50),
+          
+          sliderInput("global_plot_height", "Plot Height", 
+                      min = 300, max = 1200, value = 800, step = 50),
+          
+          sliderInput("global_font_size", "Base Font Size", 
+                      min = 8, max = 36, value = 12, step = 1),
+          
+          sliderInput("global_point_size", "Point Size", 
+                      min = 2, max = 12, value = 6, step = 1),
+          
+          radioButtons("global_color_palette", "Color Palette",
+                       choices = c("Viridis" = "viridis", 
+                                  "Plasma" = "plasma", 
+                                  "Blues" = "blues",
+                                  "Reds" = "reds"),
+                       selected = "viridis"),
+          
+          actionButton("apply_plot_settings", "Apply Settings to All Plots", 
+                       class = "btn-primary")
+        )
+      ),
+      column(8,
+        wellPanel(
+          h4("Plot Preview", style = "text-align: center; font-weight: bold;")
+        )
+      )
+    )
+  ),
+
   # --- Raw Data Analysis Tabs ---
   tabsetPanel(
     id = "main_tabs",
@@ -42,79 +433,114 @@ ui <- fluidPage(
                sidebarPanel(
                  fileInput("fcsFile", "Upload FCS/CSV/TSV File", accept = c(".fcs", ".csv", ".tsv")),
                  uiOutput("markerSelectUI"),
+                 
+                 # Transform options
                  checkboxInput("transform", "Apply arcsinh transformation", value = TRUE),
                  numericInput("cofactor", "Transformation cofactor", value = 5, min = 1, max = 10),
-                 numericInput("nEvents", "Number of events to sample", value = 5000, min = 100, step = 1000),
-                 sliderInput("perplexity", "t-SNE perplexity", min = 5, max = 50, value = 30),
-                 sliderInput("n_neighbors", "UMAP n_neighbors", min = 2, max = 100, value = 15),
-                 checkboxGroupInput("methods", "Select Dimensionality Reduction Methods", choices = c("t-SNE", "UMAP"), selected = c("t-SNE", "UMAP")),
-                 selectInput("colorBy", "Color points by:", choices = c("None")),
-                 sliderInput("plotHeight", "Plot height (px)", min = 300, max = 1200, value = 600, step = 50),
-                 sliderInput("plotWidth", "Plot width (px)", min = 300, max = 1200, value = 600, step = 50),
+                 numericInput("nEvents", "Number of events to analyze", value = 5000, min = 100, step = 1000),
                  
-                 # New clustering controls
-                 hr(),
-                 h4("Clustering Options"),
-                 checkboxInput("showClusteringOptions", "Show Clustering Tools", FALSE),
+                 # Dimensionality reduction method selection
+                 checkboxGroupInput("methods", "Select Dimensionality Reduction Methods",
+                                  choices = c("t-SNE", "UMAP"),
+                                  selected = c("t-SNE", "UMAP")),
                  
+                 # Dimensionality reduction parameters
                  conditionalPanel(
-                   condition = "input.showClusteringOptions == true",
-                   
-                   # --- clustering methods ---
-                   selectInput("clusterMethod", "Clustering Method",
-                               choices = c("K-means", "DBSCAN", "FlowSOM", "Phenograph")),
-                   
-                   conditionalPanel(
-                     condition = "input.clusterMethod == 'K-means'",
-                     numericInput("numClusters", "Number of Clusters", value = 5, min = 2, max = 20)
-                   ),
-                   conditionalPanel(
-                     condition = "input.clusterMethod == 'DBSCAN'",
-                     numericInput("dbscan_eps", "DBSCAN epsilon", value = 0.5, min = 0.01, step = 0.1),
-                     numericInput("dbscan_minPts", "DBSCAN minPts", value = 5, min = 1, step = 1)
-                   ),
-                   conditionalPanel(
-                     condition = "input.clusterMethod == 'FlowSOM'",
-                     numericInput("som_xdim", "SOM Grid X dimension", value = 5, min = 2, max = 20),
-                     numericInput("som_ydim", "SOM Grid Y dimension", value = 5, min = 2, max = 20),
-                     numericInput("som_clusters", "Number of metaclusters", value = 10, min = 2, max = 30)
-                   ),
-                   conditionalPanel(
-                     condition = "input.clusterMethod == 'Phenograph'",
-                     numericInput("pheno_k", "Phenograph k nearest neighbors", value = 30, min = 5, max = 100)
-                   ),
-                   
-                   hr(),
-                   h4("Cell Population Identification"),
-                   actionButton("identifyPopulations", "Identify Cell Populations", class = "btn-success"),
-                   checkboxInput("showPopulationLabels", "Show Population Labels on Plot", TRUE),
-                   
-                   # Add advanced configuration options for cell identification
-                   checkboxInput("showAdvancedIdentOptions", "Show Advanced Identification Options", FALSE),
-                   conditionalPanel(
-                     condition = "input.showAdvancedIdentOptions == true",
-                     sliderInput("highExpressionThreshold", "High Expression Threshold", 
-                                 min = 0.1, max = 1.5, value = 0.5, step = 0.1),
-                     sliderInput("lowExpressionThreshold", "Low Expression Threshold", 
-                                 min = -1.5, max = -0.1, value = -0.5, step = 0.1),
-                     sliderInput("minConfidenceThreshold", "Minimum Confidence Threshold (%)", 
-                                 min = 10, max = 90, value = 30, step = 5)
-                   ),
-                   
-                   checkboxInput("showClusterProfiles", "Show Cluster Profiles", TRUE),
-                   actionButton("runClustering", "Run Clustering", class = "btn-info"),
-                   
-                   hr(),
-                   h4("Heatmap Size"),
-                   sliderInput("hm_width", "Heatmap Width (px)", min = 300, max = 1200, value = 800, step = 50),
-                   sliderInput("hm_height", "Heatmap Height (px)", min = 300, max = 1200, value = 600, step = 50),
-                   
-                   # Add UI for optimization metrics in the Raw Data Analysis tab
-                   uiOutput("optimizationMetricsUI")
+                   condition = "input.methods.includes('t-SNE')",
+                   numericInput("perplexity", "t-SNE Perplexity", value = 30, min = 5, max = 50)
+                 ),
+                 conditionalPanel(
+                   condition = "input.methods.includes('UMAP')",
+                   numericInput("n_neighbors", "UMAP n_neighbors", value = 15, min = 2, max = 100)
                  ),
                  
-                 # finally your main analysis button
-                 actionButton("run", "Run Analysis", class = "btn-primary")
+                 # QC and gating options
+                 checkboxInput("performQC", "Perform Quality Control", value = TRUE),
+                 numericInput("maxAnomalies", "Max Anomalies (%)", value = 10, min = 0, max = 50),
+                 
+                 checkboxInput("performGating", "Perform Debris/Dead Cell Gating", value = TRUE),
+                 conditionalPanel(
+                   condition = "input.performGating === true",
+                   textInput("debrisGate", "FSC/SSC Parameters (comma-separated)", 
+                            value = "FSC-A,SSC-A"),
+                   selectInput("liveDeadGate", "Live/Dead Parameter", 
+                              choices = c("None", "Live Dead BV570 Violet-610-A"),
+                              selected = "None")
+                 ),
+                 
+                 # Clustering options
+                 h4("Clustering Options"),
+                 checkboxInput("showClusteringOptions", "Enable Clustering", value = TRUE),
+                 conditionalPanel(
+                   condition = "input.showClusteringOptions === true",
+                   selectInput("clusterMethod", "Clustering Method",
+                               choices = c("K-means", "DBSCAN", "FlowSOM", "Phenograph"),
+                               selected = "FlowSOM"),
+                   
+                   conditionalPanel(
+                     condition = "input.clusterMethod === 'K-means'",
+                     numericInput("numClusters", "Number of Clusters", value = 8, min = 2, max = 20)
+                   ),
+                   conditionalPanel(
+                     condition = "input.clusterMethod === 'DBSCAN'",
+                     numericInput("dbscanEps", "DBSCAN epsilon", value = 0.5, min = 0.01, step = 0.05),
+                     numericInput("dbscanMinPts", "DBSCAN minPts", value = 5, min = 1, step = 1)
+                   ),
+                   conditionalPanel(
+                     condition = "input.clusterMethod === 'FlowSOM'",
+                     numericInput("som_xdim", "SOM Grid X dimension", value = 6, min = 2, max = 20),
+                     numericInput("som_ydim", "SOM Grid Y dimension", value = 6, min = 2, max = 20),
+                     numericInput("som_clusters", "Number of metaclusters", value = 12, min = 2, max = 30)
+                   ),
+                   conditionalPanel(
+                     condition = "input.clusterMethod === 'Phenograph'",
+                     numericInput("phenoK", "Phenograph k nearest neighbors", value = 30, min = 5, max = 100)
+                   ),
+                   
+                   # Population identification
+                   h5("Population Identification"),
+                   actionButton("identifyPopulations", "Identify Cell Populations", class = "btn-success"),
+                   checkboxInput("showPopulationLabels", "Show Population Labels", value = TRUE),
+                   
+                   # Advanced identification options
+                   checkboxInput("showAdvancedIdentOptions", "Show Advanced Population ID Settings", value = FALSE),
+                   conditionalPanel(
+                     condition = "input.showAdvancedIdentOptions === true",
+                     sliderInput("highExpressionThreshold", "High Expression Threshold", 
+                                min = 0.1, max = 1.5, value = 0.5, step = 0.1),
+                     sliderInput("lowExpressionThreshold", "Low Expression Threshold", 
+                                min = -1.5, max = -0.1, value = -0.5, step = 0.1),
+                     sliderInput("minConfidenceThreshold", "Minimum Confidence Threshold (%)", 
+                                min = 10, max = 90, value = 30, step = 5)
+                   )
+                 ),
+                 
+                 # Run button
+                   hr(),
+                 actionButton("run", "Run Analysis", class = "btn-primary"),
+                 
+                 # Run clustering button (separate action)
+                 conditionalPanel(
+                   condition = "input.showClusteringOptions === true",
+                   br(),
+                   actionButton("runClustering", "Run Clustering", class = "btn-success")
+                 ),
+                 
+                 # Visualization options
+                 hr(),
+                 h4("Visualization Options"),
+                 numericInput("plotWidth", "Plot Width", value = 800, min = 400, max = 2000, step = 100),
+                 numericInput("plotHeight", "Plot Height", value = 600, min = 300, max = 1500, step = 100),
+                 
+                 # Download options
+                 hr(),
+                 h4("Download Results"),
+                 conditionalPanel(
+                   condition = "input.showClusteringOptions === true",
+                   downloadButton("downloadClusterTable", "Download Cluster Data"),
+                   br(), br()
+                 ),
+                 downloadButton("downloadProcessedData", "Download Processed Data")
                ),
                
                mainPanel(
@@ -131,109 +557,6 @@ ui <- fluidPage(
                                 tabPanel("Cluster Profiles", withSpinner(plotOutput("clusterHeatmap"))),
                                 tabPanel("Cluster Statistics", DT::dataTableOutput("clusterStats")),
                                 tabPanel("Identified Populations", DT::dataTableOutput("populationTable"))
-                              )
-                            )
-                   )
-                 )
-               )
-             )
-    ),
-    
-    # --- Sample Comparison Tab  ---
-    tabPanel("Sample Comparison",
-             sidebarLayout(
-               sidebarPanel(
-                 fileInput("fcsFile1", "Upload Control Sample", accept = c(".fcs", ".csv", ".tsv")),
-                 fileInput("fcsFile2", "Upload Treated Sample", accept = c(".fcs", ".csv", ".tsv")),
-                 selectInput("comparisonMethod", "Dimensionality Reduction Method", 
-                             choices = c("t-SNE", "UMAP"), selected = "t-SNE"),
-                 selectInput("comparisonMarkers", "Select Markers", choices = NULL, multiple = TRUE),
-                 conditionalPanel(
-                   condition = "input.comparisonMethod == 't-SNE'",
-                   sliderInput("comparisonPerplexity", "t-SNE perplexity", min = 5, max = 50, value = 30)
-                 ),
-                 conditionalPanel(
-                   condition = "input.comparisonMethod == 'UMAP'",
-                   sliderInput("comparisonNeighbors", "UMAP n_neighbors", min = 2, max = 100, value = 15)
-                 ),
-                 checkboxInput("comparisonTransform", "Apply arcsinh transformation", value = TRUE),
-                 numericInput("comparisonCofactor", "Transformation cofactor", value = 5, min = 1, max = 10),
-                 numericInput("comparisonEvents", "Events per sample", value = 5000, min = 100, step = 1000),
-                 
-                 # Add clustering controls for Sample Comparison
-                 hr(),
-                 h4("Clustering Options"),
-                 checkboxInput("showComparisonClustering", "Show Clustering Tools", FALSE),
-                 
-                 conditionalPanel(
-                   condition = "input.showComparisonClustering == true",
-                   
-                   # clustering methods
-                   selectInput("comparisonClusterMethod", "Clustering Method",
-                               choices = c("K-means", "DBSCAN", "FlowSOM", "Phenograph")),
-                   
-                   conditionalPanel(
-                     condition = "input.comparisonClusterMethod == 'K-means'",
-                     numericInput("comparisonNumClusters", "Number of Clusters", value = 5, min = 2, max = 20)
-                   ),
-                   conditionalPanel(
-                     condition = "input.comparisonClusterMethod == 'DBSCAN'",
-                     numericInput("comparison_dbscan_eps", "DBSCAN epsilon", value = 0.5, min = 0.01, step = 0.1),
-                     numericInput("comparison_dbscan_minPts", "DBSCAN minPts", value = 5, min = 1, step = 1)
-                   ),
-                   conditionalPanel(
-                     condition = "input.comparisonClusterMethod == 'FlowSOM'",
-                     numericInput("comparison_som_xdim", "SOM Grid X dimension", value = 5, min = 2, max = 20),
-                     numericInput("comparison_som_ydim", "SOM Grid Y dimension", value = 5, min = 2, max = 20),
-                     numericInput("comparison_som_clusters", "Number of metaclusters", value = 10, min = 2, max = 30)
-                   ),
-                   conditionalPanel(
-                     condition = "input.comparisonClusterMethod == 'Phenograph'",
-                     numericInput("comparison_pheno_k", "Phenograph k nearest neighbors", value = 30, min = 5, max = 100)
-                   ),
-                   actionButton("runComparisonClustering", "Run Clustering", class = "btn-info"),
-                   
-                   hr(),
-                   h4("Cell Population Identification"),
-                   actionButton("identifyComparisonPopulations", "Identify Cell Populations", class = "btn-success"),
-                   checkboxInput("showComparisonPopulationLabels", "Show Population Labels on Plot", TRUE),
-                   
-                   # Add advanced configuration options for cell identification
-                   checkboxInput("showAdvancedComparisonIdentOptions", "Show Advanced Identification Options", FALSE),
-                   conditionalPanel(
-                     condition = "input.showAdvancedComparisonIdentOptions == true",
-                     sliderInput("comparisonHighExpressionThreshold", "High Expression Threshold", 
-                                 min = 0.1, max = 1.5, value = 0.5, step = 0.1),
-                     sliderInput("comparisonLowExpressionThreshold", "Low Expression Threshold", 
-                                 min = -1.5, max = -0.1, value = -0.5, step = 0.1),
-                     sliderInput("comparisonMinConfidenceThreshold", "Minimum Confidence Threshold (%)", 
-                                 min = 10, max = 90, value = 30, step = 5)
-                   )
-                 ),
-                 
-                 actionButton("runComparison", "Run Comparison", class = "btn-primary")
-               ),
-               
-               mainPanel(
-                 tabsetPanel(
-                   tabPanel("Side-by-Side Comparison",
-                            fluidRow(
-                              column(6, h4("Control Sample", align = "center")),
-                              column(6, h4("Treated Sample", align = "center"))
-                            ),
-                            fluidRow(
-                              column(6, withSpinner(plotlyOutput("comparisonPlot1", height = "500px"))),
-                              column(6, withSpinner(plotlyOutput("comparisonPlot2", height = "500px")))
-                            )
-                   ),
-                   tabPanel("Cluster Analysis", 
-                            conditionalPanel(
-                              condition = "input.showComparisonClustering == true",
-                              tabsetPanel(
-                                tabPanel("Cluster Visualization", withSpinner(plotlyOutput("comparisonClusterPlot", height = "600px"))),
-                                tabPanel("Cluster Profiles", withSpinner(plotOutput("comparisonClusterHeatmap", height = "600px"))),
-                                tabPanel("Cluster Statistics", withSpinner(DT::dataTableOutput("comparisonClusterStats"))),
-                                tabPanel("Identified Populations", withSpinner(DT::dataTableOutput("comparisonPopulationTable")))
                               )
                             )
                    )
@@ -269,11 +592,308 @@ ui <- fluidPage(
                  )
                )
              )
+    ),
+    
+    # --- Batch Analysis Tab (replacement for Sample Comparison) ---
+    tabPanel("Batch Analysis",
+             sidebarLayout(
+               sidebarPanel(
+                 h4("Sample Management"),
+                 # Sample File Upload and Group Assignment
+                 fileInput("batchFile", "Upload FCS/CSV/TSV File", accept = c(".fcs", ".csv", ".tsv"), multiple = TRUE),
+                 uiOutput("batchSampleList"),  # Dynamic UI for sample list and group assignment
+                 actionButton("addSample", "Add Selected Files", class = "btn-info"),
+                 hr(),
+                 
+                 # Sample Grouping Options
+                 selectInput("groupingVariable", "Group Samples By:",
+                             choices = c("Manual Assignment", "Filename Pattern"),
+                             selected = "Manual Assignment"),
+                 conditionalPanel(
+                   condition = "input.groupingVariable === 'Filename Pattern'",
+                   textInput("patternControl", "Control Pattern", value = "control|ctrl"),
+                   textInput("patternTreated", "Treated Pattern", value = "treated|sample")
+                 ),
+                 hr(),
+                 
+                 # Common Analysis Parameters
+                 h4("Analysis Parameters"),
+                 uiOutput("batchMarkerSelectUI"),
+                 
+                 # Preprocessing options (same for all samples)
+                 checkboxInput("batchTransform", "Apply arcsinh transformation", value = TRUE),
+                 numericInput("batchCofactor", "Transformation cofactor", value = 5, min = 1, max = 10),
+                 numericInput("batchEvents", "Events per sample", value = 5000, min = 100, step = 1000),
+                 
+                 # Show advanced preprocessing
+                 checkboxInput("showBatchPreprocessing", "Show Advanced Preprocessing", value = FALSE),
+                 conditionalPanel(
+                   condition = "input.showBatchPreprocessing === true",
+                   # QC options
+                   h5("Quality Control"),
+                   checkboxInput("batchPerformQC", "Perform Quality Control", value = TRUE),
+                   conditionalPanel(
+                     condition = "input.showBatchPreprocessing === true && input.batchPerformQC === true",
+                     numericInput("batchMaxAnomalies", "Max Anomalies (%)", value = 10, min = 0, max = 50)
+                   ),
+                   
+                   # Gating options
+                   h5("Gating"),
+                   checkboxInput("batchPerformGating", "Perform Debris/Dead Cell Gating", value = TRUE),
+                   conditionalPanel(
+                     condition = "input.showBatchPreprocessing === true && input.batchPerformGating === true",
+                     textInput("batchDebrisGate", "FSC/SSC Parameters (comma-separated)", 
+                               value = "FSC-A,SSC-A"),
+                     selectInput("batchLiveDeadGate", "Live/Dead Parameter", 
+                                 choices = c("None", "Live Dead BV570 Violet-610-A"),
+                                 selected = "None")
+                   )
+                 ),
+                 
+                 # Dimensionality Reduction
+                 h5("Dimensionality Reduction"),
+                 selectInput("batchDimRedMethod", "Method", 
+                             choices = c("t-SNE", "UMAP"), selected = "t-SNE"),
+                 conditionalPanel(
+                   condition = "input.batchDimRedMethod === 't-SNE'",
+                   sliderInput("batchPerplexity", "t-SNE perplexity", min = 5, max = 50, value = 30)
+                 ),
+                 conditionalPanel(
+                   condition = "input.batchDimRedMethod === 'UMAP'",
+                   sliderInput("batchNeighbors", "UMAP n_neighbors", min = 2, max = 100, value = 15)
+                 ),
+                 
+                 # Add clustering controls
+                 hr(),
+                 h4("Clustering Options"),
+                 checkboxInput("showBatchClustering", "Enable Clustering", value = TRUE),
+                 
+                 conditionalPanel(
+                   condition = "input.showBatchClustering === true",
+                   # clustering methods
+                   selectInput("batchClusterMethod", "Clustering Method",
+                              choices = c("K-means", "FlowSOM", "DBSCAN", "Phenograph"),
+                              selected = "FlowSOM"),
+                   
+                   conditionalPanel(
+                     condition = "input.showBatchClustering === true && input.batchClusterMethod === 'K-means'",
+                     numericInput("batchNumClusters", "Number of Clusters", value = 8, min = 2, max = 30)
+                   ),
+                   conditionalPanel(
+                     condition = "input.showBatchClustering === true && input.batchClusterMethod === 'FlowSOM'",
+                     numericInput("batchSomXdim", "SOM Grid X dimension", value = 6, min = 2, max = 20),
+                     numericInput("batchSomYdim", "SOM Grid Y dimension", value = 6, min = 2, max = 20),
+                     numericInput("batchSomRlen", "Training iterations", value = 10, min = 5, max = 50, step = 5),
+                     numericInput("batchSomClusters", "Number of clusters", value = 12, min = 2, max = 30)
+                   ),
+                   conditionalPanel(
+                     condition = "input.showBatchClustering === true && input.batchClusterMethod === 'DBSCAN'",
+                     numericInput("batchDbscanEps", "Epsilon (neighborhood size)", value = 0.5, min = 0.1, max = 5, step = 0.1),
+                     numericInput("batchDbscanMinPts", "MinPts (min samples in neighborhood)", value = 5, min = 3, max = 50)
+                   ),
+                   conditionalPanel(
+                     condition = "input.showBatchClustering === true && input.batchClusterMethod === 'Phenograph'",
+                     numericInput("batchPhenoK", "k (nearest neighbors)", value = 30, min = 5, max = 100)
+                   ),
+                   
+                   # Population identification
+                   checkboxInput("batchIdentifyPops", "Identify Cell Populations", value = TRUE),
+                   checkboxInput("batchShowPopLabels", "Show Population Labels", value = TRUE),
+                   
+                   # Population identification thresholds
+                   conditionalPanel(
+                     condition = "input.batchIdentifyPops === true",
+                     sliderInput("batchHighExpressionThreshold", "High Expression Threshold",
+                               min = 0, max = 2, value = 0.5, step = 0.1),
+                     sliderInput("batchLowExpressionThreshold", "Low Expression Threshold",
+                               min = -2, max = 0, value = -0.5, step = 0.1),
+                     sliderInput("batchMinConfidenceThreshold", "Minimum Confidence Threshold (%)",
+                               min = 0, max = 100, value = 30, step = 5)
+                   )
+                 ),
+                 
+                 # Run button for analysis
+                 hr(),
+                 actionButton("runBatchAnalysis", "Run Batch Analysis", class = "btn-primary", 
+                              style = "width: 100%; font-weight: bold;")
+               ),
+               
+               mainPanel(
+                 tabsetPanel(
+                   tabPanel("Sample Management",
+                            h4("Sample Groups"),
+                            DT::dataTableOutput("batchSampleTable"),
+                            hr(),
+                            fluidRow(
+                              column(12, h4("Sample Management Actions")),
+                              column(4, actionButton("clearSamples", "Clear All Samples", class = "btn-warning", style = "width: 100%")),
+                              column(4, downloadButton("downloadSampleConfig", "Save Sample Config", style = "width: 100%")),
+                              column(4, div(style = "width: 100%", fileInput("uploadSampleConfig", "Load Config", accept = c(".csv"))))
+                            )
+                   ),
+                   
+                   tabPanel("Sample Visualization",
+                            fluidRow(
+                              column(3, selectInput("viewSample", "Select Sample:", choices = NULL)),
+                              column(9, h4(textOutput("sampleViewTitle"), align = "center"))
+                            ),
+                            hr(),
+                            fluidRow(
+                              column(12, 
+                                     h4("Dimensionality Reduction Plot", align = "center"),
+                                     withSpinner(plotlyOutput("sampleDimensionalityPlot", height = "600px")))
+                            ),
+                            conditionalPanel(
+                              condition = "input.showBatchClustering === true",
+                              hr(),
+                              fluidRow(
+                                column(12, h4("Clustering Visualization", align = "center")),
+                                column(6, withSpinner(plotlyOutput("sampleClusterPlot", height = "500px"))),
+                                column(6, withSpinner(plotOutput("sampleHeatmap", height = "500px")))
+                              ),
+                              hr(),
+                              fluidRow(
+                                column(12, h4("Cluster Statistics", align = "center")),
+                                column(12, withSpinner(DT::dataTableOutput("sampleClusterStats")))
+                              ),
+                              hr(),
+                              fluidRow(
+                                column(12, h4("Marker Expression by Cluster", align = "center")),
+                                column(4, selectInput("sampleMarkerSelect", "Select Marker:", choices = NULL)),
+                                column(8, withSpinner(plotlyOutput("markerExpressionByCluster", height = "500px")))
+                              )
+                            )
+                   ),
+                   
+                   tabPanel("Control vs Treated", 
+                            fluidRow(
+                              column(12, h4("Sample Comparison", align = "center")),
+                              column(6, selectInput("compareViewControl", "Control Sample:", choices = NULL)),
+                              column(6, selectInput("compareViewTreated", "Treated Sample:", choices = NULL))
+                            ),
+                            hr(),
+                            fluidRow(
+                              column(12, h4("Dimensionality Reduction Comparison", align = "center")),
+                              column(6, withSpinner(plotlyOutput("controlSamplePlot", height = "600px"))),
+                              column(6, withSpinner(plotlyOutput("treatedSamplePlot", height = "600px")))
+                            )
+                   ),
+                   
+                   tabPanel("Cluster Comparison",
+                          conditionalPanel(
+                            condition = "input.showBatchClustering === true",
+                            fluidRow(
+                              column(6, selectInput("clusterCompareControl", "Control Sample:", choices = NULL)),
+                              column(6, selectInput("clusterCompareTreated", "Treated Sample:", choices = NULL))
+                            ),
+                            hr(),
+                            fluidRow(
+                              column(12, h4("Cluster Mapping", align = "center"),
+                                    p("Visualize how clusters from Control and Treated samples relate to each other based on marker expression similarity"),
+                                    withSpinner(plotOutput("clusterMappingHeatmap", height = "600px")))
+                            ),
+                            hr(),
+                            fluidRow(
+                              column(12, h4("Signature Markers by Cluster", align = "center")),
+                              column(12, withSpinner(plotOutput("signatureMarkerHeatmap", height = "600px")))
+                            )
+                          ),
+                          conditionalPanel(
+                            condition = "!input.showBatchClustering",
+                            h3("Clustering must be enabled to use this feature", align = "center", 
+                               style = "margin-top: 100px; color: #888;")
+                          )
+                   )
+                 )
+               )
+             )
     )
   )
 )
 
 server <- function(input, output, session) {
+  
+  # --- GLOBAL PLOT SETTINGS ---
+  
+  # Reactive values to store plot settings
+  plot_settings <- reactiveValues(
+    width = 800,
+    height = 500,
+    font_size = 12,
+    point_size = 6,
+    color_palette = "viridis"
+  )
+  
+  # Update plot settings when the apply button is clicked
+  observeEvent(input$apply_plot_settings, {
+    plot_settings$width <- input$global_plot_width
+    plot_settings$height <- input$global_plot_height
+    plot_settings$font_size <- input$global_font_size
+    plot_settings$point_size <- input$global_point_size
+    plot_settings$color_palette <- input$global_color_palette
+    
+    showNotification("Plot settings applied to all visualizations", type = "message")
+  })
+  
+  # Make Raw Data Analysis visualization options affect plots directly
+  observe({
+    # Only update when explicitly changed in Raw Data tab to avoid conflicts with global settings
+    if (!is.null(input$plotWidth) && !is.null(input$plotHeight)) {
+      plot_settings$width <- input$plotWidth
+      plot_settings$height <- input$plotHeight
+    }
+  })
+  
+  # Function to get the active color palette
+  get_color_palette <- function() {
+    palette_name <- plot_settings$color_palette
+    
+    switch(palette_name,
+           "viridis" = scale_color_viridis_d(),
+           "plasma" = scale_color_viridis_d(option = "plasma"),
+           "blues" = scale_color_brewer(palette = "Blues"),
+           "reds" = scale_color_brewer(palette = "Reds"),
+           scale_color_viridis_d()  # Default fallback
+    )
+  }
+  
+  # Function to get fill palette
+  get_fill_palette <- function() {
+    palette_name <- plot_settings$color_palette
+    
+    switch(palette_name,
+           "viridis" = scale_fill_viridis_c(),
+           "plasma" = scale_fill_viridis_c(option = "plasma"),
+           "blues" = scale_fill_distiller(palette = "Blues", direction = 1),
+           "reds" = scale_fill_distiller(palette = "Reds", direction = 1),
+           scale_fill_viridis_c()  # Default fallback
+    )
+  }
+  
+  # Function to create a standard ggplot theme
+  get_standard_theme <- function() {
+    theme_minimal(base_size = plot_settings$font_size) +
+      theme(
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.title = element_text(face = "bold"),
+        legend.title = element_text(face = "bold"),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(color = "grey80", fill = NA)
+      )
+  }
+  
+  # Function to create standard tooltips for plotly
+  create_standard_tooltip <- function(plot) {
+    plot %>% layout(
+      hoverlabel = list(
+        bgcolor = "white",
+        font = list(family = "Arial", size = plot_settings$font_size)
+      ),
+      height = plot_settings$height,
+      width = plot_settings$width
+    )
+  }
   
   # --- RAW DATA ANALYSIS (from first app) ---
   
@@ -432,6 +1052,30 @@ server <- function(input, output, session) {
       )
     }
     
+    # Add preprocessing metrics
+    if (!is.null(results$metrics)) {
+      metrics_ui <- tagAppendChildren(
+        metrics_ui,
+        hr(),
+        h4("Preprocessing Metrics"),
+        div(
+          h5("Quality Control:"),
+          p(paste("Initial cells:", results$metrics$qc$initial_count)),
+          p(paste("After QC:", results$metrics$qc$final_count)),
+          p(paste("Removed:", round(results$metrics$qc$removed_pct * 100, 1), "%"))
+        ),
+        div(
+          h5("Gating:"),
+          p(paste("After gating:", results$metrics$gating$final_count)),
+          p(paste("Removed in gating:", round(results$metrics$gating$removed_pct * 100, 1), "%"))
+        ),
+        div(
+          h5("Sampling:"),
+          p(paste("Final analyzed cells:", nrow(results$sampled_data)))
+        )
+      )
+    }
+    
     return(metrics_ui)
   })
   
@@ -447,40 +1091,71 @@ server <- function(input, output, session) {
     req(input$selectedMarkers)
     
     withProgress(message = 'Processing data...', value = 0, {
-      data <- rawFCS()
-      if (inherits(data, "flowFrame")) {
-        exprs_data <- exprs(data)[, input$selectedMarkers, drop = FALSE]
-      } else {
-        exprs_data <- data[, input$selectedMarkers, drop = FALSE]
+      # Get data
+      raw_data <- rawFCS()
+      
+      # Prepare preprocessing parameters
+      preprocessing_params <- list(
+        markers = input$selectedMarkers,
+        transform = input$transform,
+        cofactor = input$cofactor,
+        n_events = input$nEvents,
+        perform_qc = isTRUE(input$performQC),
+        perform_gating = isTRUE(input$performGating),
+        scale_data = TRUE,
+        seed = 123
+      )
+      
+      # Add QC settings if QC is enabled
+      if (isTRUE(input$performQC)) {
+        preprocessing_params$qc_settings <- list(
+          max_anomalies = input$maxAnomalies / 100  # Convert from percentage to proportion
+        )
       }
       
-      set.seed(123)
-      sampled_indices <- sample(nrow(exprs_data), min(input$nEvents, nrow(exprs_data)))
-      sampled_data <- exprs_data[sampled_indices, ]
-      
-      incProgress(0.2, detail = "Transforming data...")
-      if (input$transform) {
-        sampled_data <- apply(sampled_data, 2, asinhTransform, cofactor = input$cofactor)
+      # Add gating parameters if gating is enabled
+      if (isTRUE(input$performGating)) {
+        # Parse debris gate parameters from comma-separated string
+        debris_gate_params <- unlist(strsplit(input$debrisGate, ",\\s*"))
+        
+        preprocessing_params$gates <- list(
+          debris_gate = if (length(debris_gate_params) >= 2) debris_gate_params[1:2] else NULL,
+          live_dead_gate = if (!is.null(input$liveDeadGate) && input$liveDeadGate != "None") input$liveDeadGate else NULL
+        )
       }
       
-      scaled_data <- scale(sampled_data)
+      # Run preprocessing pipeline
+      incProgress(0.1, detail = "Preprocessing data...")
+      preprocessing_results <- preprocessFlowData(raw_data, preprocessing_params)
       
-      results <- list(raw_data = sampled_data, scaled_data = scaled_data)
+      # Run dimensionality reduction methods
+      results <- list(
+        raw_data = preprocessing_results$raw_data,
+        qc_data = preprocessing_results$qc_data,
+        gated_data = preprocessing_results$gated_data,
+        transformed_data = preprocessing_results$transformed_data,
+        sampled_data = preprocessing_results$sampled_data,
+        scaled_data = preprocessing_results$scaled_data,
+        metrics = preprocessing_results$metrics
+      )
       
       if ("t-SNE" %in% input$methods) {
         incProgress(0.4, detail = "Running t-SNE...")
-        tsne_result <- Rtsne(scaled_data, dims = 2, perplexity = input$perplexity, verbose = FALSE)
+        tsne_result <- Rtsne(preprocessing_results$scaled_data, dims = 2, perplexity = input$perplexity, verbose = FALSE)
         results$tsne <- data.frame(tsne1 = tsne_result$Y[,1], tsne2 = tsne_result$Y[,2])
       }
       
       if ("UMAP" %in% input$methods) {
         incProgress(0.7, detail = "Running UMAP...")
-        umap_result <- umap(scaled_data, n_neighbors = input$n_neighbors)
+        umap_result <- umap(preprocessing_results$scaled_data, n_neighbors = input$n_neighbors)
         results$umap <- data.frame(umap1 = umap_result[,1], umap2 = umap_result[,2])
       }
       
-      plot_data <- as.data.frame(sampled_data)
+      # Create plot data
+      plot_data <- as.data.frame(preprocessing_results$sampled_data)
       colnames(plot_data) <- input$selectedMarkers
+      
+      # Add dimensionality reduction coordinates
       if (!is.null(results$tsne)) {
         plot_data$tsne1 <- results$tsne$tsne1
         plot_data$tsne2 <- results$tsne$tsne2
@@ -495,6 +1170,19 @@ server <- function(input, output, session) {
       
       # Reset clustering and gates when new data is loaded
       clustering_results(NULL)
+      
+      # Display notification about preprocessing results
+      if (!is.null(results$metrics)) {
+        qc_removed <- round(results$metrics$qc$removed_pct * 100, 1)
+        gating_removed <- round(results$metrics$gating$removed_pct * 100, 1)
+        
+        msg <- paste0("Preprocessing complete: ", 
+                      qc_removed, "% removed in QC, ",
+                      gating_removed, "% removed in gating. ",
+                      "Analyzing ", nrow(results$sampled_data), " cells.")
+        
+        showNotification(msg, type = "message", duration = 5)
+      }
     })
   })
   
@@ -566,6 +1254,13 @@ server <- function(input, output, session) {
         incProgress(0.3, detail = "Running FlowSOM clustering...")
         
         tryCatch({
+          # Validate dimensions to ensure they are numeric and >= 2
+          xdim <- max(2, as.numeric(input$som_xdim))
+          ydim <- max(2, as.numeric(input$som_ydim))
+          
+          # Validate number of metaclusters
+          n_metaclusters <- max(2, min(30, as.numeric(input$som_clusters)))
+          
           # Create FlowSOM object
           # First, create a flowFrame from the matrix with proper marker names
           marker_matrix <- as.matrix(marker_data)
@@ -581,15 +1276,35 @@ server <- function(input, output, session) {
           # Use ReadInput to properly prepare the data for FlowSOM
           fsom_input <- FlowSOM::ReadInput(fcs_data, transform = FALSE, scale = FALSE)
           
-          # Now build the SOM
-          fsom <- FlowSOM::BuildSOM(fsom_input, 
-                                    xdim = input$som_xdim, 
-                                    ydim = input$som_ydim)
+          # Now build the SOM with validated parameters
+          showNotification(
+            sprintf("Building SOM grid with dimensions %d x %d...", xdim, ydim),
+            type = "message",
+            duration = 3
+          )
+          
+          # Build the SOM with explicit validations
+          fsom <- FlowSOM::BuildSOM(
+            fsom_input, 
+            colsToUse = NULL,  # Use all columns
+            xdim = xdim,       # Validated x dimension
+            ydim = ydim,       # Validated y dimension
+            rlen = 12,         # Default training length
+            silent = FALSE     # Show progress
+          )
           
           # Get metaclusters
-          metacl <- FlowSOM::MetaClustering(fsom$map$codes, 
-                                            method = "metaClustering_consensus",
-                                            max = input$som_clusters)
+          showNotification(
+            sprintf("Creating %d metaclusters...", n_metaclusters),
+            type = "message", 
+            duration = 3
+          )
+          
+          metacl <- FlowSOM::MetaClustering(
+            fsom$map$codes, 
+            method = "metaClustering_consensus",
+            max = n_metaclusters
+          )
           
           # Get cluster IDs for each cell
           # First map to SOM clusters
@@ -622,11 +1337,12 @@ server <- function(input, output, session) {
           )
           
           clustering_results(results)
+          showNotification("FlowSOM clustering completed successfully", type = "message", duration = 3)
         }, error = function(e) {
-          # Show error message to user
+          # Show detailed error message
           showNotification(
             paste("FlowSOM error:", e$message, 
-                  "Try adjusting parameters or selecting different markers."),
+                  "Try adjusting SOM parameters or selecting different markers."),
             type = "error",
             duration = 10
           )
@@ -637,7 +1353,7 @@ server <- function(input, output, session) {
         
         tryCatch({
           # Run Phenograph
-          pheno_result <- Rphenograph(as.matrix(marker_data), k = input$pheno_k)
+          pheno_result <- Rphenograph(as.matrix(marker_data), k = input$phenoK)
           
           # Get cluster IDs
           cluster_ids <- as.numeric(membership(pheno_result[[2]]))
@@ -693,32 +1409,74 @@ server <- function(input, output, session) {
     # Create a copy of plot_data to avoid modifying the reactive value
     plot_data_copy <- plot_data
     
-    # If clustering results exist, add them to the plot data
-    if (!is.null(clustering_results()) && input$colorBy == "Cluster") {
-      plot_data_copy$Cluster <- as.factor(clustering_results()$cluster_ids)
-      
-      p <- ggplot(plot_data_copy, aes(x = tsne1, y = tsne2, color = Cluster, 
-                                      text = paste("Cluster:", Cluster))) +
-        geom_point(alpha = 0.7) +
-        scale_color_viridis_d() +
-        labs(color = "Cluster")
-    } else if (!is.null(input$colorBy) && input$colorBy != "None" && input$colorBy != "Cluster") {
-      p <- ggplot(plot_data_copy, aes(x = tsne1, y = tsne2)) +
-        geom_point(aes(color = .data[[input$colorBy]], 
-                       text = paste("Value:", .data[[input$colorBy]])), alpha = 0.7) +
-        scale_color_viridis_c() +
-        labs(color = input$colorBy)
-    } else {
-      p <- ggplot(plot_data_copy, aes(x = tsne1, y = tsne2)) +
-        geom_point(aes(text = paste("Index:", rownames(plot_data_copy))), alpha = 0.7)
+    # Add row names if missing
+    if (is.null(rownames(plot_data_copy))) {
+      rownames(plot_data_copy) <- paste0("Cell_", 1:nrow(plot_data_copy))
     }
     
+    # Ensure colorBy input is valid
+    if (is.null(input$colorBy)) {
+      colorBy <- "None"
+    } else {
+      colorBy <- input$colorBy
+    }
     
-    p <- p + labs(title = "t-SNE Projection", x = "t-SNE 1", y = "t-SNE 2") +
-      theme_minimal(base_size = 16) +
-      theme(axis.title = element_text(size = 18), axis.text = element_text(size = 14))
+    # If clustering results exist, add them to the plot data
+    if (!is.null(clustering_results()) && colorBy == "Cluster") {
+      plot_data_copy$Cluster <- as.factor(clustering_results()$cluster_ids)
+      
+      # First create a ggplot object
+      p <- ggplot(plot_data_copy, aes(x = tsne1, y = tsne2, color = Cluster)) +
+        geom_point(alpha = 0.7, size = plot_settings$point_size/2) +
+        get_color_palette() +
+        labs(
+          title = "t-SNE Projection",
+          x = "t-SNE 1", 
+          y = "t-SNE 2", 
+          color = "Cluster"
+        ) +
+        get_standard_theme()
+      
+    } else if (!is.null(colorBy) && colorBy != "None" && colorBy != "Cluster" && 
+               colorBy %in% colnames(plot_data_copy)) {
+      p <- ggplot(plot_data_copy, aes(x = tsne1, y = tsne2)) +
+        geom_point(aes(color = .data[[colorBy]]), 
+                 alpha = 0.7, size = plot_settings$point_size/2) +
+        scale_color_viridis_c() +
+        labs(
+          title = "t-SNE Projection",
+          x = "t-SNE 1", 
+          y = "t-SNE 2", 
+          color = colorBy
+        ) +
+        get_standard_theme()
+    } else {
+      # Default: No coloring
+      p <- ggplot(plot_data_copy, aes(x = tsne1, y = tsne2)) +
+        geom_point(alpha = 0.7, size = plot_settings$point_size/2, color = "#3366CC") +
+        labs(
+          title = "t-SNE Projection", 
+          x = "t-SNE 1", 
+          y = "t-SNE 2"
+        ) +
+        get_standard_theme()
+    }
     
-    ggplotly(p, tooltip = "text") %>% layout(height = input$plotHeight, width = input$plotWidth)
+    # Create basic tooltips
+    tooltip_info <- paste0("Index: ", rownames(plot_data_copy),
+                          "<br>t-SNE 1: ", round(plot_data_copy$tsne1, 2),
+                          "<br>t-SNE 2: ", round(plot_data_copy$tsne2, 2))
+    
+    # Convert to plotly with proper dimensions
+    p <- ggplotly(p, width = plot_settings$width, height = plot_settings$height) 
+    
+    # Apply additional styling
+    p %>% layout(
+      hoverlabel = list(
+        bgcolor = "white",
+        font = list(family = "Arial", size = plot_settings$font_size)
+      )
+    )
   })
   
   output$umapPlot <- renderPlotly({
@@ -748,13 +1506,20 @@ server <- function(input, output, session) {
       p <- ggplot(plot_data_copy, aes(x = umap1, y = umap2)) +
         geom_point(aes(text = paste("Index:", rownames(plot_data_copy))), alpha = 0.7)
     }
-    
-    
+
     p <- p + labs(title = "UMAP Projection", x = "UMAP 1", y = "UMAP 2") +
       theme_minimal(base_size = 16) +
       theme(axis.title = element_text(size = 18), axis.text = element_text(size = 14))
     
-    ggplotly(p, tooltip = "text") %>% layout(height = input$plotHeight, width = input$plotWidth)
+    ggplotly(p, tooltip = "text") %>% 
+      layout(
+        height = plot_settings$height, 
+        width = plot_settings$width,
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(family = "Arial", size = plot_settings$font_size)
+        )
+      )
   })
   
   # Cluster visualization in dedicated tab
@@ -797,8 +1562,8 @@ server <- function(input, output, session) {
       layout(title = paste("Clusters from", clustering_results()$method),
              xaxis = list(title = dim_labels[1]),
              yaxis = list(title = dim_labels[2]),
-             height = input$plotHeight,
-             width = input$plotWidth)
+             height = plot_settings$height,
+             width = plot_settings$width)
     
     p
   })
@@ -806,29 +1571,28 @@ server <- function(input, output, session) {
   # Cluster heatmap
   output$clusterHeatmap <- renderPlot(
     {
-      library(reshape2)
+      req(clustering_results())
       centers <- clustering_results()$centers
       df <- as.data.frame(centers) %>%
         tibble::rownames_to_column("Cluster") %>%
-        melt(id.vars = "Cluster", variable.name = "Marker", value.name = "Expression")
+        reshape2::melt(id.vars = "Cluster", variable.name = "Marker", value.name = "Expression")
       
       ggplot(df, aes(x = Marker, y = Cluster, fill = Expression)) +
         geom_tile() +
         scale_fill_gradient2(low = "navy", mid = "white", high = "firebrick3") +
         labs(
           title = paste("Cluster Intensity Profiles from", clustering_results()$method),
-          x = "Markers", y = "Clusters"
+          x = "Markers", y = "Clusters",
+          fill = "Expression"
         ) +
-        theme_minimal(base_size = 16) +
+        get_standard_theme() +
         theme(
-          axis.text.x   = element_text(angle = 45, hjust = 1, size = 14),
-          axis.text.y   = element_text(size = 16),
-          plot.title    = element_text(size = 18, face = "bold"),
-          axis.title    = element_text(size = 16)
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          axis.text.y = element_text(face = "bold")
         )
     },
-    width  = function() input$hm_width,
-    height = function() input$hm_height
+    width = function() plot_settings$width,
+    height = function() plot_settings$height
   )
   
   # Cluster statistics
@@ -854,7 +1618,7 @@ server <- function(input, output, session) {
                   options = list(scrollX = TRUE, pageLength = 5),
                   caption = paste("Cluster statistics from", clustering_results()$method))
   })
-  
+
   # --- CELL POPULATION IDENTIFICATION ---
   
   identified_populations <- reactiveVal(NULL)
@@ -923,10 +1687,11 @@ server <- function(input, output, session) {
   
   # Function to identify cell populations based on marker expression patterns
   identify_cell_populations <- function(cluster_centers, marker_names, 
-                                        high_threshold = 0.5, 
-                                        low_threshold = -0.5,
-                                        min_confidence = 0.3) {
-    # Create a proper initial data frame first
+                                        high_threshold = 0.3,  # Lowered from 0.5
+                                        low_threshold = -0.3,  # Raised from -0.5
+                                        min_confidence = 0.2) { # Lowered from 0.3
+    
+    # Create results dataframe
     results <- data.frame(
       Cluster = 1:nrow(cluster_centers),
       Population = rep("Unknown", nrow(cluster_centers)),
@@ -935,71 +1700,55 @@ server <- function(input, output, session) {
       stringsAsFactors = FALSE
     )
     
-    # Define more comprehensive cell population templates
+    # Define cell population templates based on this panel
     cell_population_templates <- list(
       "CD4+ T cells" = list(
         high = c("CD3", "CD4"),
         medium = c(),
-        low = c("CD8", "CD19", "CD56")
+        low = c("FOXP3", "BCL6")
       ),
-      "CD8+ T cells" = list(
-        high = c("CD3", "CD8"),
+      "CD8+ T cells (inferred)" = list(
+        high = c("CD3"),
         medium = c(),
-        low = c("CD4", "CD19", "CD56")
-      ),
-      "B cells" = list(
-        high = c("CD19", "CD20"),
-        medium = c("MHCII"),
-        low = c("CD3", "CD56")
-      ),
-      "NK cells" = list(
-        high = c("CD56"),
-        medium = c("CD16"),
-        low = c("CD3", "CD19")
+        low = c("CD4", "FOXP3", "BCL6")
       ),
       "Regulatory T cells" = list(
         high = c("CD3", "CD4", "FOXP3"),
-        medium = c("CD25"),
-        low = c("CD8", "CD19")
+        medium = c(),
+        low = c("BCL6", "CXCR5")
       ),
-      "Helper T cells" = list(
-        high = c("CD3", "CD4"),
-        medium = c("CD40L"),
-        low = c("CD8", "FOXP3")
+      "T follicular helper cells" = list(
+        high = c("CD3", "CD4", "CXCR5", "BCL6"),
+        medium = c(),
+        low = c("FOXP3")
       ),
-      "Monocytes" = list(
-        high = c("CD14"),
-        medium = c("CD11B", "CD33"),
-        low = c("CD3", "CD19", "CD56")
+      "MHCII+ APCs" = list(
+        high = c("MHCII"),
+        medium = c(),
+        low = c("CD3", "CD4")
       ),
-      "Dendritic cells" = list(
-        high = c("CD11C", "MHCII", "HLA-DR"),
-        medium = c("CD83", "CD86"),
-        low = c("CD3", "CD19", "CD14", "CD56")
+      "Proliferating T cells" = list(
+        high = c("CD3", "KI67"),
+        medium = c(),
+        low = c()
       ),
-      "Follicular Helper T cells" = list(
-        high = c("CD3", "CD4", "CXCR5", "BCI6"),
-        medium = c("PD1", "ICOS"),
-        low = c("CD8", "FOXP3")
+      "Proliferating Tregs" = list(
+        high = c("CD3", "CD4", "FOXP3", "KI67"),
+        medium = c(),
+        low = c("BCL6", "CXCR5")
       ),
-      "Th1 cells" = list(
-        high = c("CD3", "CD4", "TBET"),
-        medium = c("IFNG"),
-        low = c("CD8", "GATA3", "FOXP3")
+      "Proliferating Tfh cells" = list(
+        high = c("CD3", "CD4", "CXCR5", "BCL6", "KI67"),
+        medium = c(),
+        low = c("FOXP3")
       ),
-      "Th2 cells" = list(
-        high = c("CD3", "CD4", "GATA3"),
-        medium = c("IL4"),
-        low = c("CD8", "TBET", "FOXP3")
-      ),
-      "Th17 cells" = list(
-        high = c("CD3", "CD4", "RORC"),
-        medium = c("IL17A"),
-        low = c("CD8", "FOXP3")
+      "Activated T cells" = list(
+        high = c("CD3", "MHCII"),
+        medium = c(),
+        low = c()
       )
     )
     
-    # More robust normalization and mapping of marker names
     # Function to clean and standardize marker names
     clean_marker_name <- function(name) {
       # Convert to uppercase
@@ -1012,37 +1761,87 @@ server <- function(input, output, session) {
       name <- gsub(" +[A-Z]+$", "", name)  # Remove single suffix like A
       name <- gsub("[-_\\s]+", "", name)   # Remove spaces, hyphens, underscores
       
-      # Common marker name variations
-      name <- gsub("^DR$", "HLADR", name)
-      name <- gsub("^MHCII$", "HLADR", name)
-      name <- gsub("^IFN[GY]$", "INTERFERON", name)
-      name <- gsub("^IL4$", "INTERLEUKIN4", name)
+      # Special cases for your panel
+      name <- gsub("^MHCII$", "MHCII", name)
+      name <- gsub("^KI-?67$", "KI67", name)
+      name <- gsub("^FOXP3$", "FOXP3", name)
+      name <- gsub("^BCL6$", "BCL6", name)
       
       return(name)
     }
     
-    # Apply standardization to marker names
-    normalized_markers <- sapply(marker_names, clean_marker_name)
-    
-    # Add manual mapping for specific markers if needed
-    manual_map <- list(
+    # Manual mapping for the specific markers in your dataset
+    manual_mapping <- list(
+      # Original channel names
+      "FL5-A - CD3 FITC FITC-A" = "CD3",
+      "FL13-A - CD4 APCCy7 APC-A750-A" = "CD4",
+      "FL11-A - MHC II AF647 APC-A" = "MHCII",
+      "FL12-A - Foxp3 A700 APC-A700-A" = "FOXP3",
+      "FL1-A - CXCR5 BV421 PB450-A" = "CXCR5",
+      "FL7-A - BCl6 PE PE-A" = "BCL6",
+      "FL10-A - Ki67 PECy7 PC7-A" = "KI67",
+      "FL3-A - Live Dead BV570 Violet610-A" = "LIVEDEAD",
+      
+      # Channel numbers alone
       "FL5-A" = "CD3",
       "FL13-A" = "CD4",
       "FL11-A" = "MHCII",
       "FL12-A" = "FOXP3",
       "FL1-A" = "CXCR5",
-      "FL2-A" = "CX3",
-      "FL4-A" = "IGG2",
-      "FL7-A" = "BCI6",
-      "FL8-A" = "IGG",
-      "FL10-A" = "KI67"
+      "FL7-A" = "BCL6", 
+      "FL10-A" = "KI67",
+      "FL3-A" = "LIVEDEAD",
+      
+      # Direct marker names
+      "CD3" = "CD3",
+      "CD4" = "CD4",
+      "MHC" = "MHCII",
+      "FOXP3" = "FOXP3",
+      "CXCR5" = "CXCR5",
+      "BCL6" = "BCL6",
+      "KI67" = "KI67",
+      "DEAD" = "LIVEDEAD"
     )
     
+    # Apply standardization to marker names
+    normalized_markers <- sapply(marker_names, clean_marker_name)
+    
+    # Print diagnostics - will help with debugging
+    print("Normalized markers: ")
+    print(normalized_markers)
+    print("Original markers: ")
+    print(marker_names)
+    
+    # Direct map markers using our manual mapping
+    mapped_markers <- character(length(marker_names))
     for (i in 1:length(marker_names)) {
-      if (marker_names[i] %in% names(manual_map)) {
-        normalized_markers[i] <- manual_map[[marker_names[i]]]
+      # Try exact match first
+      if (marker_names[i] %in% names(manual_mapping)) {
+        mapped_markers[i] <- manual_mapping[[marker_names[i]]]
+      } 
+      # Try normalized match
+      else if (normalized_markers[i] %in% names(manual_mapping)) {
+        mapped_markers[i] <- manual_mapping[[normalized_markers[i]]]
+      }
+      # Try partial matching as a fallback
+      else {
+        for (pattern in names(manual_mapping)) {
+          if (grepl(pattern, marker_names[i], ignore.case = TRUE)) {
+            mapped_markers[i] <- manual_mapping[[pattern]]
+            break
+          }
+        }
+      }
+      
+      # If still not mapped, use normalized name
+      if (is.null(mapped_markers[i]) || mapped_markers[i] == "") {
+        mapped_markers[i] <- normalized_markers[i]
       }
     }
+    
+    # Debug output of mapping
+    print("Mapped markers: ")
+    print(mapped_markers)
     
     # Calculate z-scores for all markers across clusters
     z_scores <- apply(cluster_centers, 2, function(x) {
@@ -1050,11 +1849,15 @@ server <- function(input, output, session) {
       return((x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE))
     })
     
+    # Add column names back to z-scores matrix
+    colnames(z_scores) <- colnames(cluster_centers)
+    
     # For each cluster, compare expression profile to templates
     for (i in 1:nrow(cluster_centers)) {
       best_match <- "Unknown"
       best_score <- 0
       best_details <- ""
+      match_scores <- list()
       
       # Compare with each reference profile
       for (pop_name in names(cell_population_templates)) {
@@ -1075,15 +1878,15 @@ server <- function(input, output, session) {
         
         # Check for high-expression markers
         for (marker in template$high) {
-          clean_marker <- clean_marker_name(marker)
-          matching_cols <- grep(paste0("^", clean_marker, "$"), normalized_markers, ignore.case = TRUE)
+          # Find index of this marker in our mapped list
+          matching_indices <- which(mapped_markers == marker)
           
-          if (length(matching_cols) > 0) {
+          if (length(matching_indices) > 0) {
             total_markers <- total_markers + high_weight
-            col_idx <- matching_cols[1]  # Take first match if multiple
+            col_idx <- matching_indices[1]  # Take first match if multiple
             marker_z <- z_scores[i, col_idx]
             
-            if (marker_z > high_threshold) {
+            if (!is.na(marker_z) && marker_z > high_threshold) {
               score <- score + high_weight
               matched_high <- c(matched_high, marker_names[col_idx])
               matching_details <- c(matching_details, paste0(marker_names[col_idx], "(+)"))
@@ -1093,15 +1896,14 @@ server <- function(input, output, session) {
         
         # Check for medium-expression markers
         for (marker in template$medium) {
-          clean_marker <- clean_marker_name(marker)
-          matching_cols <- grep(paste0("^", clean_marker, "$"), normalized_markers, ignore.case = TRUE)
+          matching_indices <- which(mapped_markers == marker)
           
-          if (length(matching_cols) > 0) {
+          if (length(matching_indices) > 0) {
             total_markers <- total_markers + medium_weight
-            col_idx <- matching_cols[1]
+            col_idx <- matching_indices[1]
             marker_z <- z_scores[i, col_idx]
             
-            if (marker_z > -0.2 && marker_z < 0.7) {  # Medium expression range
+            if (!is.na(marker_z) && marker_z > -0.2 && marker_z < 0.7) {  # Medium expression range
               score <- score + medium_weight
               matched_medium <- c(matched_medium, marker_names[col_idx])
               matching_details <- c(matching_details, paste0(marker_names[col_idx], "(~)"))
@@ -1111,15 +1913,14 @@ server <- function(input, output, session) {
         
         # Check for low-expression markers
         for (marker in template$low) {
-          clean_marker <- clean_marker_name(marker)
-          matching_cols <- grep(paste0("^", clean_marker, "$"), normalized_markers, ignore.case = TRUE)
+          matching_indices <- which(mapped_markers == marker)
           
-          if (length(matching_cols) > 0) {
+          if (length(matching_indices) > 0) {
             total_markers <- total_markers + low_weight
-            col_idx <- matching_cols[1]
+            col_idx <- matching_indices[1]
             marker_z <- z_scores[i, col_idx]
             
-            if (marker_z < low_threshold) {
+            if (!is.na(marker_z) && marker_z < low_threshold) {
               score <- score + low_weight
               matched_low <- c(matched_low, marker_names[col_idx])
               matching_details <- c(matching_details, paste0(marker_names[col_idx], "(-)"))
@@ -1138,6 +1939,9 @@ server <- function(input, output, session) {
                              length(matched_low), "/", length(template$low), " low markers. ",
                              "Confidence: ", round(confidence * 100, 1), "%")
           
+          print(log_text)  # Add logging
+          match_scores[[pop_name]] <- confidence
+          
           # If this population is a better match than previous ones
           if (confidence > best_score && confidence > min_confidence) {
             best_score <- confidence
@@ -1151,6 +1955,10 @@ server <- function(input, output, session) {
       results$Population[i] <- best_match
       results$Confidence[i] <- best_score * 100  # Convert to percentage
       results$MatchDetails[i] <- best_details
+      
+      # Log all match scores for this cluster
+      print(paste("Cluster", i, "match scores:"))
+      print(match_scores)
     }
     
     return(results)
@@ -1274,8 +2082,8 @@ server <- function(input, output, session) {
       layout(title = paste("Clusters from", clustering_results()$method),
              xaxis = list(title = dim_labels[1]),
              yaxis = list(title = dim_labels[2]),
-             height = input$plotHeight,
-             width = input$plotWidth)
+             height = plot_settings$height,
+             width = plot_settings$width)
     
     # Add cluster labels with population names if available
     if (!is.null(identified_populations()) && input$showPopulationLabels) {
@@ -1322,462 +2130,9 @@ server <- function(input, output, session) {
            xlsx = read.xlsx(input$cleanedFile$datapath),
            validate("Unsupported file format"))
   })
-  
-  # --- SAMPLE COMPARISON FUNCTIONALITY ---
-  
-  # Create reactive expressions for the two files
-  fcsFile1 <- reactive({
-    req(input$fcsFile1)
-    ext <- tools::file_ext(input$fcsFile1$name)
-    switch(ext,
-           "fcs" = read.FCS(input$fcsFile1$datapath, transformation = FALSE),
-           "csv" = fread(input$fcsFile1$datapath),
-           "tsv" = fread(input$fcsFile1$datapath, sep = "\t"),
-           stop("Unsupported file format")
-    )
-  })
-  
-  fcsFile2 <- reactive({
-    req(input$fcsFile2)
-    ext <- tools::file_ext(input$fcsFile2$name)
-    switch(ext,
-           "fcs" = read.FCS(input$fcsFile2$datapath, transformation = FALSE),
-           "csv" = fread(input$fcsFile2$datapath),
-           "tsv" = fread(input$fcsFile2$datapath, sep = "\t"),
-           stop("Unsupported file format")
-    )
-  })
-  
-  # Update marker choices when both files are loaded
-  observe({
-    req(input$fcsFile1, input$fcsFile2)
-    
-    # Get marker options from first file
-    data1 <- fcsFile1()
-    data2 <- fcsFile2()
-    
-    if (inherits(data1, "flowFrame") && inherits(data2, "flowFrame")) {
-      # Get common parameters between both files
-      params1 <- parameters(data1)
-      params2 <- parameters(data2)
-      
-      common_markers <- intersect(params1$name, params2$name)
-      choices <- setNames(common_markers, paste0(common_markers, " - ", params1$desc[match(common_markers, params1$name)]))
-    } else {
-      # For non-flowFrame data
-      common_markers <- intersect(colnames(data1), colnames(data2))
-      choices <- common_markers
-    }
-    
-    updateSelectInput(session, "comparisonMarkers", choices = choices, 
-                      selected = choices[1:min(5, length(choices))])
-  })
-  
-  # Process both files for comparison
-  comparison_results <- reactiveVal(NULL)
-  
-  observeEvent(input$runComparison, {
-    req(input$fcsFile1, input$fcsFile2, input$comparisonMarkers)
-    
-    withProgress(message = 'Processing comparison...', value = 0, {
-      # Process file 1
-      data1 <- fcsFile1()
-      if (inherits(data1, "flowFrame")) {
-        exprs_data1 <- exprs(data1)[, input$comparisonMarkers, drop = FALSE]
-      } else {
-        exprs_data1 <- data1[, input$comparisonMarkers, drop = FALSE]
-      }
-      
-      # Process file 2
-      data2 <- fcsFile2()
-      if (inherits(data2, "flowFrame")) {
-        exprs_data2 <- exprs(data2)[, input$comparisonMarkers, drop = FALSE]
-      } else {
-        exprs_data2 <- data2[, input$comparisonMarkers, drop = FALSE]
-      }
-      
-      # Sample events - ensure equal number of cells from each sample
-      set.seed(123)
-      max_events <- min(input$comparisonEvents, min(nrow(exprs_data1), nrow(exprs_data2)))
-      
-      # Log the number of cells being sampled
-      cat("Sampling", max_events, "cells from each sample\n")
-      
-      sampled_indices1 <- sample(nrow(exprs_data1), max_events)
-      sampled_indices2 <- sample(nrow(exprs_data2), max_events)
-      
-      sampled_data1 <- exprs_data1[sampled_indices1, ]
-      sampled_data2 <- exprs_data2[sampled_indices2, ]
-      
-      # Transform if requested
-      incProgress(0.2, detail = "Transforming data...")
-      if (input$comparisonTransform) {
-        sampled_data1 <- apply(sampled_data1, 2, asinhTransform, cofactor = input$comparisonCofactor)
-        sampled_data2 <- apply(sampled_data2, 2, asinhTransform, cofactor = input$comparisonCofactor)
-      }
-      
-      # Create separate scaled data for each sample
-      scaled_data1 <- scale(sampled_data1)
-      scaled_data2 <- scale(sampled_data2)
-      
-      # First perform dimensionality reduction separately for each sample
-      incProgress(0.3, detail = paste("Running", input$comparisonMethod, "on individual samples..."))
-      
-      # Run DR on Control sample
-      if (input$comparisonMethod == "t-SNE") {
-        dr_result1 <- Rtsne(scaled_data1, dims = 2, perplexity = min(30, max(5, max_events/10)), verbose = FALSE)
-        reduced_data1 <- data.frame(dim1 = dr_result1$Y[,1], dim2 = dr_result1$Y[,2])
-      } else {
-        dr_result1 <- umap(scaled_data1, n_neighbors = min(15, max(3, max_events/10)))
-        reduced_data1 <- data.frame(dim1 = dr_result1[,1], dim2 = dr_result1[,2])
-      }
-      
-      # Run DR on Treated sample
-      if (input$comparisonMethod == "t-SNE") {
-        dr_result2 <- Rtsne(scaled_data2, dims = 2, perplexity = min(30, max(5, max_events/10)), verbose = FALSE)
-        reduced_data2 <- data.frame(dim1 = dr_result2$Y[,1], dim2 = dr_result2$Y[,2])
-      } else {
-        dr_result2 <- umap(scaled_data2, n_neighbors = min(15, max(3, max_events/10)))
-        reduced_data2 <- data.frame(dim1 = dr_result2[,1], dim2 = dr_result2[,2])
-      }
-      
-      # Then optionally run on combined data for comparison
-      incProgress(0.5, detail = paste("Running", input$comparisonMethod, "on combined data..."))
-      
-      # Combine data for joint dimensionality reduction
-      combined_data <- rbind(sampled_data1, sampled_data2)
-      combined_scaled <- scale(combined_data)
-      
-      if (input$comparisonMethod == "t-SNE") {
-        dr_result_combined <- Rtsne(combined_scaled, dims = 2, perplexity = input$comparisonPerplexity, verbose = FALSE)
-        reduced_data_combined <- data.frame(dim1 = dr_result_combined$Y[,1], dim2 = dr_result_combined$Y[,2])
-      } else {
-        dr_result_combined <- umap(combined_scaled, n_neighbors = input$comparisonNeighbors)
-        reduced_data_combined <- data.frame(dim1 = dr_result_combined[,1], dim2 = dr_result_combined[,2])
-      }
-      
-      # Split the combined results
-      result1_combined <- reduced_data_combined[1:nrow(sampled_data1), ]
-      result2_combined <- reduced_data_combined[(nrow(sampled_data1)+1):nrow(combined_data), ]
-      
-      # Add original data to the individual reductions
-      result1 <- cbind(reduced_data1, as.data.frame(sampled_data1))
-      result2 <- cbind(reduced_data2, as.data.frame(sampled_data2))
-      
-      # Add original data to the combined reduction
-      result1_combined <- cbind(result1_combined, as.data.frame(sampled_data1))
-      result2_combined <- cbind(result2_combined, as.data.frame(sampled_data2))
-      
-      # Mark sample origin
-      result1$sample <- "Control"
-      result2$sample <- "Treated"
-      result1_combined$sample <- "Control"
-      result2_combined$sample <- "Treated"
-      
-      # Add a flag to indicate which reduction method was used
-      result1$reduction_type <- "individual"
-      result2$reduction_type <- "individual"
-      result1_combined$reduction_type <- "combined"
-      result2_combined$reduction_type <- "combined"
-      
-      # Store both separate and combined results
-      combined_result_separate <- rbind(result1, result2)
-      combined_result_combined <- rbind(result1_combined, result2_combined)
-      
-      # Store results - now including both reduction approaches
-      comparison_results(list(
-        control = result1,
-        treated = result2,
-        control_combined = result1_combined, 
-        treated_combined = result2_combined,
-        combined = combined_result_combined,
-        combined_separate = combined_result_separate,
-        method = input$comparisonMethod,
-        n_control = nrow(result1),
-        n_treated = nrow(result2)
-      ))
-      
-      # Reset clustering when new data is loaded
-      comparison_clustering_results(NULL)
-    })
-  })
-  
-  # Plot individual comparisons
-  output$comparisonPlot1 <- renderPlotly({
-    req(comparison_results())
-    results <- comparison_results()
-    
-    p <- ggplot(results$control, aes(x = dim1, y = dim2)) +
-      geom_point(alpha = 0.7, color = "blue") +
-      labs(title = "Control Sample",
-           x = paste(results$method, "1"), 
-           y = paste(results$method, "2")) +
-      theme_minimal()
-    
-    ggplotly(p)
-  })
-  
-  output$comparisonPlot2 <- renderPlotly({
-    req(comparison_results())
-    results <- comparison_results()
-    
-    p <- ggplot(results$treated, aes(x = dim1, y = dim2)) +
-      geom_point(alpha = 0.7, color = "red") +
-      labs(title = "Treated Sample",
-           x = paste(results$method, "1"), 
-           y = paste(results$method, "2")) +
-      theme_minimal()
-    
-    ggplotly(p)
-  })
-  
-  # Create outputs for comparison clustering visualizations
-  
-  # Update combined visualization to include cluster information
-  output$combinedComparisonPlot <- renderPlotly({
-    req(comparison_results())
-    results <- comparison_results()
-    
-    plot_data <- results$combined
-    
-    # Add cluster information if available
-    if (!is.null(comparison_clustering_results())) {
-      plot_data$Cluster <- as.factor(comparison_clustering_results()$cluster_ids)
-      
-      p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = sample, shape = Cluster)) +
-        geom_point(alpha = 0.7) +
-        scale_color_manual(values = c("Control" = "blue", "Treated" = "red")) +
-        labs(title = paste("Combined", results$method, "Projection with Clusters"),
-             x = paste(results$method, "1"), 
-             y = paste(results$method, "2")) +
-        theme_minimal()
-    } else {
-      p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = sample)) +
-        geom_point(alpha = 0.7) +
-        scale_color_manual(values = c("Control" = "blue", "Treated" = "red")) +
-        labs(title = paste("Combined", results$method, "Projection"),
-             x = paste(results$method, "1"), 
-             y = paste(results$method, "2")) +
-        theme_minimal()
-    }
-    
-    ggplotly(p)
-  })
-  
-  # Dedicated cluster plot
-  output$comparisonClusterPlot <- renderPlotly({
-    req(comparison_clustering_results(), comparison_results())
-    
-    results <- comparison_results()
-    
-    # Get the total number of cells from both samples
-    total_cells <- results$n_control + results$n_treated
-    
-    # Extract individual sample data
-    control_data <- results$control
-    treated_data <- results$treated
-    
-    # Get cluster IDs
-    cluster_ids <- comparison_clustering_results()$cluster_ids
-    
-    # Check if cluster IDs match the total number of cells
-    if (length(cluster_ids) != total_cells) {
-      showNotification(paste("Cluster ID mismatch:", length(cluster_ids), 
-                             "IDs for", total_cells, "cells. Adjusting..."), 
-                       type = "warning", duration = 5)
-      
-      # Fix the mismatch - either truncate or extend the cluster IDs
-      if (length(cluster_ids) > total_cells) {
-        cluster_ids <- cluster_ids[1:total_cells]
-      } else {
-        # Fill with most common cluster ID if not enough
-        most_common <- as.numeric(names(sort(table(cluster_ids), decreasing = TRUE)[1]))
-        cluster_ids <- c(cluster_ids, rep(most_common, total_cells - length(cluster_ids)))
-      }
-    }
-    
-    # Split cluster IDs between control and treated samples
-    control_cluster_ids <- cluster_ids[1:nrow(control_data)]
-    treated_cluster_ids <- cluster_ids[(nrow(control_data)+1):length(cluster_ids)]
-    
-    # Assign cluster IDs to each sample
-    control_data$Cluster <- as.factor(control_cluster_ids)
-    treated_data$Cluster <- as.factor(treated_cluster_ids)
-    
-    # Add population labels if available
-    if (!is.null(comparison_identified_populations()) && input$showComparisonPopulationLabels) {
-      pop_data <- comparison_identified_populations()
-      
-      # Helper function to safely assign population labels
-      assign_populations <- function(data) {
-        if (nrow(data) == 0) {
-          return(data)
-        }
-        
-        cluster_nums <- as.numeric(as.character(data$Cluster))
-        valid_idx <- cluster_nums <= nrow(pop_data) & cluster_nums > 0
-        
-        if (!all(valid_idx)) {
-          showNotification("Some cluster IDs couldn't be matched to populations", type = "warning")
-          cluster_nums[!valid_idx] <- 1
-        }
-        
-        data$Population <- pop_data$Population[cluster_nums]
-        return(data)
-      }
-      
-      control_data <- assign_populations(control_data)
-      treated_data <- assign_populations(treated_data)
-      
-      # Create hover text for each sample
-      control_hover <- paste(
-        "Cluster:", control_data$Cluster,
-        "<br>Population:", control_data$Population,
-        "<br>", results$method, "1:", round(control_data$dim1, 2),
-        "<br>", results$method, "2:", round(control_data$dim2, 2)
-      )
-      
-      treated_hover <- paste(
-        "Cluster:", treated_data$Cluster,
-        "<br>Population:", treated_data$Population,
-        "<br>", results$method, "1:", round(treated_data$dim1, 2),
-        "<br>", results$method, "2:", round(treated_data$dim2, 2)
-      )
-    } else {
-      # Simple hover text without population info
-      control_hover <- paste(
-        "Cluster:", control_data$Cluster,
-        "<br>", results$method, "1:", round(control_data$dim1, 2),
-        "<br>", results$method, "2:", round(control_data$dim2, 2)
-      )
-      
-      treated_hover <- paste(
-        "Cluster:", treated_data$Cluster,
-        "<br>", results$method, "1:", round(treated_data$dim1, 2),
-        "<br>", results$method, "2:", round(treated_data$dim2, 2)
-      )
-    }
-    
-    # Now create a subplot with both samples side by side
-    # Control plot
-    p1 <- plot_ly(control_data, x = ~dim1, y = ~dim2, color = ~Cluster, 
-                  text = control_hover, type = "scatter", mode = "markers",
-                  marker = list(size = 8, opacity = 0.7),
-                  showlegend = FALSE) %>%
-      layout(
-        title = "Control Sample",
-        xaxis = list(title = paste(results$method, "1")),
-        yaxis = list(title = paste(results$method, "2")),
-        margin = list(t = 50)
-      )
-    
-    # Treated plot  
-    p2 <- plot_ly(treated_data, x = ~dim1, y = ~dim2, color = ~Cluster, 
-                  text = treated_hover, type = "scatter", mode = "markers",
-                  marker = list(size = 8, opacity = 0.7)) %>%
-      layout(
-        title = "Treated Sample",
-        xaxis = list(title = paste(results$method, "1")),
-        yaxis = list(title = paste(results$method, "2")),
-        margin = list(t = 50)
-      )
-    
-    # Combine into a single subplot with shared legend
-    combinedPlot <- subplot(p1, p2, nrows = 1, shareY = TRUE, titleX = TRUE) %>%
-      layout(
-        title = list(
-          text = paste("Clusters from", comparison_clustering_results()$method),
-          font = list(size = 20)
-        ),
-        legend = list(title = list(text = "Cluster")),
-        annotations = list(
-          list(
-            x = 0.25, y = 1,
-            text = paste("Control (", nrow(control_data), " cells)", sep=""),
-            showarrow = FALSE,
-            xref = "paper",
-            yref = "paper",
-            font = list(size = 16)
-          ),
-          list(
-            x = 0.75, y = 1,
-            text = paste("Treated (", nrow(treated_data), " cells)", sep=""),
-            showarrow = FALSE,
-            xref = "paper",
-            yref = "paper",
-            font = list(size = 16)
-          )
-        )
-      )
-    
-    return(combinedPlot)
-  })
-  
-  # Cluster heatmap
-  output$comparisonClusterHeatmap <- renderPlot({
-    req(comparison_clustering_results())
-    
-    library(reshape2)
-    centers <- comparison_clustering_results()$centers
-    df <- as.data.frame(centers) %>%
-      tibble::rownames_to_column("Cluster") %>%
-      melt(id.vars = "Cluster", variable.name = "Marker", value.name = "Expression")
-    
-    ggplot(df, aes(x = Marker, y = Cluster, fill = Expression)) +
-      geom_tile() +
-      scale_fill_gradient2(low = "navy", mid = "white", high = "firebrick3") +
-      labs(
-        title = paste("Cluster Intensity Profiles from", comparison_clustering_results()$method),
-        x = "Markers", y = "Clusters"
-      ) +
-      theme_minimal(base_size = 16) +
-      theme(
-        axis.text.x   = element_text(angle = 45, hjust = 1, size = 14),
-        axis.text.y   = element_text(size = 16),
-        plot.title    = element_text(size = 18, face = "bold"),
-        axis.title    = element_text(size = 16)
-      )
-  })
-  
-  # Cluster statistics including sample distribution
-  output$comparisonClusterStats <- DT::renderDataTable({
-    req(comparison_clustering_results(), comparison_results())
-    
-    # Get data with clusters
-    plot_data <- comparison_results()$combined
-    plot_data$Cluster <- as.factor(comparison_clustering_results()$cluster_ids)
-    
-    # Calculate basic cluster statistics
-    cluster_stats <- plot_data %>%
-      group_by(Cluster) %>%
-      summarize(
-        Count = n(),
-        Percentage = n() / nrow(plot_data) * 100,
-        across(all_of(input$comparisonMarkers), 
-               list(Mean = ~mean(., na.rm = TRUE), 
-                    Median = ~median(., na.rm = TRUE),
-                    SD = ~sd(., na.rm = TRUE)))
-      )
-    
-    # Calculate sample distribution within each cluster
-    sample_distribution <- plot_data %>%
-      group_by(Cluster, sample) %>%
-      summarize(Count = n(), .groups = "drop_last") %>%
-      mutate(Percentage = Count / sum(Count) * 100) %>%
-      pivot_wider(
-        id_cols = Cluster,
-        names_from = sample, 
-        values_from = c(Count, Percentage),
-        names_glue = "{sample}_{.value}"
-      )
-    
-    # Join the two tables
-    full_stats <- left_join(cluster_stats, sample_distribution, by = "Cluster")
-    
-    DT::datatable(full_stats, 
-                  options = list(scrollX = TRUE, pageLength = 5),
-                  caption = paste("Cluster statistics from", comparison_clustering_results()$method))
-  })
+
+
+  # --- CLEANED DATA ANALYSIS CODE ---
   
   markers_cleaned <- reactive({
     req(cleaned_data())
@@ -1888,309 +2243,1362 @@ server <- function(input, output, session) {
     
     datatable(summary_df)
   })
+ 
+  # ---- BATCH ANALYSIS FUNCTIONALITY ----
   
-  # --- SAMPLE COMPARISON CLUSTERING ---
+  # Create reactive values to store batch samples and their results
+  batchSamples <- reactiveVal(list())
+  batchResults <- reactiveVal(list())
   
-  comparison_clustering_results <- reactiveVal(NULL)
-  comparison_identified_populations <- reactiveVal(NULL) # Store identified populations for comparison
-  
-  observeEvent(input$runComparisonClustering, {
-    req(comparison_results(), input$comparisonMarkers)
+  # Function to add samples to the batch list
+  observeEvent(input$addSample, {
+    req(input$batchFile)
     
-    # Reset identified populations when new clustering is performed
-    comparison_identified_populations(NULL)
+    # Get current sample list
+    current_samples <- batchSamples()
     
-    withProgress(message = 'Clustering comparison data...', value = 0, {
-      # Get marker data for both control and treated samples
-      results <- comparison_results()
+    # Process new files
+    for (i in 1:nrow(input$batchFile)) {
+      file_data <- input$batchFile[i, ]
+      sample_id <- paste0("sample_", length(current_samples) + 1)
       
-      # Extract the marker columns, not the dimensionality reduction columns
-      control_data <- results$control[, input$comparisonMarkers, drop = FALSE]
-      treated_data <- results$treated[, input$comparisonMarkers, drop = FALSE]
-      
-      # Combine data for clustering - using marker expression values not the DR coordinates
-      combined_markers <- rbind(control_data, treated_data)
-      
-      # Count cells
-      n_control <- nrow(control_data)
-      n_treated <- nrow(treated_data)
-      total_cells <- n_control + n_treated
-      
-      # Log info
-      cat(sprintf("Clustering %d total cells (%d Control, %d Treated)\n", 
-                  total_cells, n_control, n_treated))
-      
-      # Scale the marker data for clustering
-      scaled_markers <- scale(combined_markers)
-      
-      # Run the selected clustering algorithm
-      if (input$comparisonClusterMethod == "K-means") {
-        set.seed(123)  # For reproducibility
-        incProgress(0.3, detail = "Running K-means clustering...")
-        
-        # Run K-means
-        km <- kmeans(scaled_markers, centers = input$comparisonNumClusters, nstart = 25)
-        cluster_ids <- km$cluster
-        
-        # Store cluster centers
-        centers <- km$centers
-        colnames(centers) <- input$comparisonMarkers
-        
-        # Create results object
-        results <- list(
-          cluster_ids = cluster_ids,
-          centers = centers,
-          method = "K-means"
-        )
-        
-        comparison_clustering_results(results)
-      }
-      else if (input$comparisonClusterMethod == "DBSCAN") {
-        incProgress(0.3, detail = "Running DBSCAN clustering...")
-        
-        # Run DBSCAN
-        dbscan_result <- dbscan::dbscan(scaled_markers, 
-                                        eps = input$comparison_dbscan_eps, 
-                                        minPts = input$comparison_dbscan_minPts)
-        cluster_ids <- dbscan_result$cluster
-        
-        # Handle outliers (cluster 0 in DBSCAN) - assign to a new cluster
-        if (any(cluster_ids == 0)) {
-          max_cluster <- max(cluster_ids)
-          cluster_ids[cluster_ids == 0] <- max_cluster + 1
-          showNotification(paste("Assigned", sum(cluster_ids == (max_cluster + 1)), 
-                                 "DBSCAN outlier points to cluster", max_cluster + 1),
-                           type = "message")
+      # Determine group based on filename pattern or default to "Unknown"
+      group <- "Unknown"
+      if (input$groupingVariable == "Filename Pattern") {
+        if (grepl(input$patternControl, file_data$name, ignore.case = TRUE)) {
+          group <- "Control"
+        } else if (grepl(input$patternTreated, file_data$name, ignore.case = TRUE)) {
+          group <- "Treated"
         }
-        
-        # Calculate cluster centers
-        unique_clusters <- sort(unique(cluster_ids))
-        centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(combined_markers))
-        
-        for (i in seq_along(unique_clusters)) {
-          cluster_idx <- which(cluster_ids == unique_clusters[i])
-          if (length(cluster_idx) > 0) {
-            centers[i,] <- colMeans(combined_markers[cluster_idx, , drop = FALSE])
-          }
-        }
-        
-        colnames(centers) <- input$comparisonMarkers
-        
-        # Create results object
-        results <- list(
-          cluster_ids = cluster_ids,
-          centers = centers,
-          method = "DBSCAN"
-        )
-        
-        comparison_clustering_results(results)
       }
-      else if (input$comparisonClusterMethod == "FlowSOM") {
-        incProgress(0.3, detail = "Running FlowSOM clustering...")
-        
-        tryCatch({
-          # Create a flowFrame for FlowSOM
-          marker_matrix <- as.matrix(combined_markers)
-          colnames(marker_matrix) <- input$comparisonMarkers
-          fcs_data <- flowCore::flowFrame(marker_matrix)
-          
-          # Set proper parameters
-          params <- flowCore::parameters(fcs_data)
-          params$name <- input$comparisonMarkers
-          params$desc <- input$comparisonMarkers
-          flowCore::parameters(fcs_data) <- params
-          
-          # Prepare data for FlowSOM
-          fsom_input <- FlowSOM::ReadInput(fcs_data, transform = FALSE, scale = TRUE)
-          
-          # Build the SOM
-          fsom <- FlowSOM::BuildSOM(fsom_input, 
-                                    xdim = input$comparison_som_xdim, 
-                                    ydim = input$comparison_som_ydim)
-          
-          # Get metaclusters
-          metacl <- FlowSOM::MetaClustering(fsom$map$codes, 
-                                            method = "metaClustering_consensus",
-                                            max = input$comparison_som_clusters)
-          
-          # Get cluster IDs for each cell
-          cell_som_clusters <- fsom$map$mapping[,1]
-          cell_metaclusters <- metacl[cell_som_clusters]
-          
-          # Calculate metacluster centers
-          unique_clusters <- sort(unique(cell_metaclusters))
-          centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(combined_markers))
-          
-          for (i in seq_along(unique_clusters)) {
-            cluster_idx <- which(cell_metaclusters == unique_clusters[i])
-            if (length(cluster_idx) > 0) {
-              centers[i,] <- colMeans(combined_markers[cluster_idx, , drop = FALSE])
-            }
-          }
-          
-          colnames(centers) <- input$comparisonMarkers
-          
-          # Create results object
-          results <- list(
-            cluster_ids = cell_metaclusters,
-            centers = centers,
-            som_object = fsom,
-            som_clusters = cell_som_clusters,
-            metaclusters = metacl,
-            method = "FlowSOM"
-          )
-          
-          comparison_clustering_results(results)
-        }, error = function(e) {
-          showNotification(
-            paste("FlowSOM error:", e$message, 
-                  "Try adjusting parameters or selecting different markers."),
-            type = "error",
-            duration = 10
-          )
-        })
-      }
-      else if (input$comparisonClusterMethod == "Phenograph") {
-        incProgress(0.3, detail = "Running Phenograph clustering...")
-        
-        tryCatch({
-          # Run Phenograph - adjust k parameter based on dataset size
-          k_param <- min(input$comparison_pheno_k, max(5, floor(total_cells/5)))
-          
-          if (k_param != input$comparison_pheno_k) {
-            showNotification(paste("Adjusted Phenograph k parameter to", k_param, 
-                                   "based on dataset size"),
-                             type = "message")
-          }
-          
-          pheno_result <- Rphenograph(as.matrix(scaled_markers), k = k_param)
-          
-          # Get cluster IDs
-          cluster_ids <- as.numeric(membership(pheno_result[[2]]))
-          
-          # Calculate cluster centers
-          unique_clusters <- sort(unique(cluster_ids))
-          centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(combined_markers))
-          
-          for (i in seq_along(unique_clusters)) {
-            cluster_idx <- which(cluster_ids == unique_clusters[i])
-            if (length(cluster_idx) > 0) {
-              centers[i,] <- colMeans(combined_markers[cluster_idx, , drop = FALSE])
-            }
-          }
-          
-          colnames(centers) <- input$comparisonMarkers
-          
-          # Create results object
-          results <- list(
-            cluster_ids = cluster_ids,
-            centers = centers,
-            pheno_object = pheno_result,
-            method = "Phenograph"
-          )
-          
-          comparison_clustering_results(results)
-          
-          # If successful, show info about cluster distribution
-          control_clusters <- cluster_ids[1:n_control]
-          treated_clusters <- cluster_ids[(n_control+1):total_cells]
-          
-          control_unique <- length(unique(control_clusters))
-          treated_unique <- length(unique(treated_clusters))
-          
-          showNotification(paste("Clustering complete. Control sample has cells in", 
-                                 control_unique, "clusters. Treated sample has cells in", 
-                                 treated_unique, "clusters."),
-                           type = "message", duration = 5)
-          
-        }, error = function(e) {
-          showNotification(
-            paste("Phenograph error:", e$message, 
-                  "Try adjusting k parameter or selecting different markers."),
-            type = "error",
-            duration = 10
-          )
-        })
-      }
-    })
+      
+      # Add the sample to the list
+      current_samples[[sample_id]] <- list(
+        id = sample_id,
+        name = file_data$name,
+        path = file_data$datapath,
+        group = group,
+        added = Sys.time()
+      )
+    }
+    
+    # Update the sample list
+    batchSamples(current_samples)
   })
   
-  # Handle the comparison population identification button click
-  observeEvent(input$identifyComparisonPopulations, {
-    req(comparison_clustering_results())
-    
-    withProgress(message = 'Identifying cell populations in comparison data...', value = 0, {
-      # Get cluster centers
-      centers <- comparison_clustering_results()$centers
-      marker_names <- colnames(centers)
-      
-      # Run identification algorithm with user-configured thresholds
-      populations <- identify_cell_populations(
-        centers, 
-        marker_names,
-        high_threshold = input$comparisonHighExpressionThreshold,
-        low_threshold = input$comparisonLowExpressionThreshold,
-        min_confidence = input$comparisonMinConfidenceThreshold/100  # Convert from percentage
-      )
-      
-      # Store results
-      comparison_identified_populations(populations)
-      
-      # Show notification
-      showNotification("Cell populations identified for comparison clusters", type = "message")
-    })
+  # Clear all samples
+  observeEvent(input$clearSamples, {
+    batchSamples(list())
+    batchResults(list())
   })
   
-  # Comparison population results table
-  output$comparisonPopulationTable <- DT::renderDataTable({
-    req(comparison_identified_populations(), comparison_clustering_results(), comparison_results())
+  # UI for sample list management
+  output$batchSampleList <- renderUI({
+    samples <- batchSamples()
+    if (length(samples) == 0) {
+      return(div(
+        style = "margin-top: 15px; text-align: center;",
+        "No samples added yet. Use the file selector above to add samples."
+      ))
+    }
     
-    population_info <- comparison_identified_populations()
-    
-    # Add cluster sizes and distribution by sample
-    cluster_counts <- table(comparison_clustering_results()$cluster_ids)
-    total_cells <- sum(cluster_counts)
-    
-    # Get sample distribution for each cluster
-    plot_data <- comparison_results()$combined
-    plot_data$Cluster <- comparison_clustering_results()$cluster_ids
-    
-    # Calculate per-sample distribution
-    sample_distribution <- plot_data %>%
-      group_by(Cluster, sample) %>%
-      summarize(Count = n(), .groups = "drop_last") %>%
-      mutate(Percentage = Count / sum(Count) * 100) %>%
-      pivot_wider(
-        id_cols = Cluster,
-        names_from = sample, 
-        values_from = c(Count, Percentage),
-        names_glue = "{sample}_{.value}"
+    # Create a panel for each sample
+    sample_panels <- lapply(samples, function(sample) {
+      div(
+        style = "border: 1px solid #ddd; border-radius: 5px; padding: 10px; margin-bottom: 10px;",
+        div(
+          style = "display: flex; justify-content: space-between;",
+          strong(sample$name),
+          selectInput(
+            inputId = paste0("group_", sample$id),
+            label = NULL,
+            choices = c("Control", "Treated", "Unknown"),
+            selected = sample$group,
+            width = "120px"
+          )
+        ),
+        div(
+          style = "display: flex; justify-content: space-between; margin-top: 5px;",
+          span(paste("Added:", format(sample$added, "%Y-%m-%d %H:%M"))),
+          actionButton(
+            inputId = paste0("remove_", sample$id),
+            label = "Remove",
+            class = "btn-danger btn-sm"
+          )
+        )
       )
+    })
     
-    # Create main results table  
-    result_table <- data.frame(
-      Cluster = population_info$Cluster,
-      Population = population_info$Population,
-      Count = as.numeric(cluster_counts[population_info$Cluster]),
-      Percentage = round(as.numeric(cluster_counts[population_info$Cluster]) / total_cells * 100, 2),
-      Confidence = round(population_info$Confidence, 1),
-      MatchDetails = population_info$MatchDetails
+    # Return the UI
+    div(
+      style = "max-height: 300px; overflow-y: auto; padding: 10px; border: 1px solid #eee; margin-top: 10px;",
+      do.call(tagList, sample_panels)
     )
+  })
+  
+  # Update sample groups when changed in UI
+  observe({
+    samples <- batchSamples()
+    if (length(samples) == 0) return()
     
-    # Merge with sample distribution info
-    result_table <- left_join(result_table, sample_distribution, by = "Cluster")
+    # Check for group changes
+    updated <- FALSE
+    for (id in names(samples)) {
+      group_input_id <- paste0("group_", id)
+      if (!is.null(input[[group_input_id]])) {
+        if (samples[[id]]$group != input[[group_input_id]]) {
+          samples[[id]]$group <- input[[group_input_id]]
+          updated <- TRUE
+        }
+      }
+    }
     
-    # Sort by population name then by cluster number
-    result_table <- result_table[order(result_table$Population, result_table$Cluster), ]
+    # Update samples if needed
+    if (updated) {
+      batchSamples(samples)
+    }
+  })
+  
+  # Handle sample removal buttons
+  observe({
+    samples <- batchSamples()
+    if (length(samples) == 0) return()
+    
+    # Check for remove button clicks
+    for (id in names(samples)) {
+      # Local id to avoid capturing issues
+      local_id <- id 
+      remove_id <- paste0("remove_", local_id)
+      
+      observeEvent(input[[remove_id]], {
+        current_samples <- batchSamples()
+        current_samples[[local_id]] <- NULL
+        batchSamples(current_samples)
+      }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    }
+  })
+  
+  # Display the sample table
+  output$batchSampleTable <- DT::renderDataTable({
+    samples <- batchSamples()
+    if (length(samples) == 0) {
+      return(data.frame(
+        "Sample Name" = character(0),
+        "Group" = character(0),
+        "Status" = character(0)
+      ))
+    }
+    
+    # Create a data frame for the table
+    df <- data.frame(
+      "Sample ID" = sapply(samples, function(s) s$id),
+      "Sample Name" = sapply(samples, function(s) s$name),
+      "Group" = sapply(samples, function(s) s$group),
+      "Status" = sapply(samples, function(s) {
+        if (!is.null(batchResults()[[s$id]])) {
+          "Analyzed"
+        } else {
+          "Pending"
+        }
+      }),
+      stringsAsFactors = FALSE
+    )
     
     DT::datatable(
-      result_table,
+      df,
       options = list(
         pageLength = 10,
+        searching = TRUE,
+        dom = 'tip',
         scrollX = TRUE
       ),
-      caption = "Identified Cell Populations for Sample Comparison"
+      rownames = FALSE
     )
+  })
+  
+  # Create marker selection UI for batch analysis
+  output$batchMarkerSelectUI <- renderUI({
+    samples <- batchSamples()
+    if (length(samples) == 0) {
+      return(div("Add samples first to select markers"))
+    }
+    
+    # Try to get markers from the first sample
+    first_sample <- samples[[1]]
+    
+    # Load the sample data
+    tryCatch({
+      file_data <- loadFlowData(first_sample$path, first_sample$name)$data
+      
+      if (inherits(file_data, "flowFrame")) {
+        exprs_data <- exprs(file_data)
+        params <- parameters(file_data)
+        choices <- setNames(colnames(exprs_data), paste0(colnames(exprs_data), " - ", params$desc))
+      } else {
+        exprs_data <- file_data
+        choices <- colnames(exprs_data)
+      }
+      
+      selectInput(
+        "batchSelectedMarkers", 
+        "Select Markers/Channels", 
+        choices = choices, 
+        selected = choices[1:min(8, length(choices))], 
+        multiple = TRUE
+      )
+    }, error = function(e) {
+      div("Error loading sample data:", e$message)
+    })
+  })
+  
+  # Handle save/load sample configuration 
+  output$downloadSampleConfig <- downloadHandler(
+    filename = function() {
+      paste0("flowcyto_samples_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    },
+    content = function(file) {
+      samples <- batchSamples()
+      if (length(samples) == 0) return(NULL)
+      
+      # Create a data frame for export
+      df <- data.frame(
+        id = sapply(samples, function(s) s$id),
+        name = sapply(samples, function(s) s$name),
+        path = sapply(samples, function(s) s$path),
+        group = sapply(samples, function(s) s$group),
+        stringsAsFactors = FALSE
+      )
+      
+      write.csv(df, file, row.names = FALSE)
+    }
+  )
+  
+  # Handle loading sample configuration
+  observeEvent(input$uploadSampleConfig, {
+    req(input$uploadSampleConfig)
+    
+    tryCatch({
+      config <- read.csv(input$uploadSampleConfig$datapath, stringsAsFactors = FALSE)
+      
+      # Validate the config
+      if (!all(c("id", "name", "path", "group") %in% colnames(config))) {
+        showNotification("Invalid configuration file format", type = "error")
+        return()
+      }
+      
+      # Create sample list from config
+      samples <- list()
+      for (i in 1:nrow(config)) {
+        samples[[config$id[i]]] <- list(
+          id = config$id[i],
+          name = config$name[i],
+          path = config$path[i],
+          group = config$group[i],
+          added = Sys.time()
+        )
+      }
+      
+      batchSamples(samples)
+      showNotification("Sample configuration loaded", type = "message")
+    }, error = function(e) {
+      showNotification(paste("Error loading configuration:", e$message), type = "error")
+    })
+  })
+  
+  # Run the batch analysis
+  observeEvent(input$runBatchAnalysis, {
+    samples <- batchSamples()
+    
+    if (length(samples) == 0) {
+      showNotification("No samples to analyze", type = "warning")
+      return()
+    }
+    
+    req(input$batchSelectedMarkers)
+    
+    # Prepare common preprocessing parameters
+    preprocessing_params <- list(
+      markers = input$batchSelectedMarkers,
+      transform = input$batchTransform,
+      cofactor = input$batchCofactor,
+      n_events = input$batchEvents,
+      perform_qc = isTRUE(input$batchPerformQC),
+      perform_gating = isTRUE(input$batchPerformGating),
+      scale_data = TRUE,
+      seed = 123
+    )
+    
+    # Add QC settings if enabled
+    if (isTRUE(input$batchPerformQC)) {
+      preprocessing_params$qc_settings <- list(
+        max_anomalies = input$batchMaxAnomalies / 100  # Convert from percentage to proportion
+      )
+    }
+    
+    # Add gating parameters if enabled
+    if (isTRUE(input$batchPerformGating)) {
+      # Parse debris gate parameters from comma-separated string
+      debris_gate_params <- unlist(strsplit(input$batchDebrisGate, ",\\s*"))
+      
+      preprocessing_params$gates <- list(
+        debris_gate = if (length(debris_gate_params) >= 2) debris_gate_params[1:2] else NULL,
+        live_dead_gate = if (input$batchLiveDeadGate != "None") input$batchLiveDeadGate else NULL
+      )
+    }
+    
+    # Initialize results list
+    results <- list()
+    
+    # Define a processing function for one sample
+    processSample <- function(sample) {
+      withProgress(
+        message = paste("Processing", sample$name),
+        value = 0, 
+        {
+          # Load the file data
+          file_data <- loadFlowData(sample$path, sample$name)$data
+          
+          # Process the data using the common parameters
+          incProgress(0.2, detail = "Preprocessing data...")
+          preprocess_results <- preprocessFlowData(file_data, preprocessing_params)
+          
+          # Run dimensionality reduction
+          incProgress(0.4, detail = paste("Running", input$batchDimRedMethod, "..."))
+          
+          # Perform dimensionality reduction
+          if (input$batchDimRedMethod == "t-SNE") {
+            perplexity_value <- min(input$batchPerplexity, max(5, nrow(preprocess_results$scaled_data) / 10))
+            dr_result <- Rtsne(preprocess_results$scaled_data, dims = 2, perplexity = perplexity_value, verbose = FALSE)
+            reduced_data <- data.frame(dim1 = dr_result$Y[,1], dim2 = dr_result$Y[,2])
+          } else {
+            neighbors_value <- min(input$batchNeighbors, max(3, nrow(preprocess_results$scaled_data) / 15))
+            dr_result <- umap(preprocess_results$scaled_data, n_neighbors = neighbors_value)
+            reduced_data <- data.frame(dim1 = dr_result[,1], dim2 = dr_result[,2])
+          }
+          
+          # Create plot data
+          plot_data <- as.data.frame(preprocess_results$sampled_data)
+          colnames(plot_data) <- input$batchSelectedMarkers
+          
+          # Add dimensionality reduction coordinates
+          plot_data$dim1 <- reduced_data$dim1
+          plot_data$dim2 <- reduced_data$dim2
+          
+          # Run clustering if enabled
+          cluster_results <- NULL
+          if (input$showBatchClustering) {
+            incProgress(0.6, detail = paste("Clustering with", input$batchClusterMethod, "..."))
+            
+            # Extract marker data for clustering
+            marker_data <- plot_data[, input$batchSelectedMarkers, drop = FALSE]
+            
+            # Run clustering based on selected method
+            if (input$batchClusterMethod == "K-means") {
+              set.seed(123)
+              km <- kmeans(marker_data, centers = input$batchNumClusters, nstart = 10)
+              cluster_ids <- km$cluster
+              
+              # Store cluster centers for intensity profiles
+              centers <- km$centers
+              colnames(centers) <- input$batchSelectedMarkers
+              
+              cluster_results <- list(
+                cluster_ids = cluster_ids,
+                centers = centers,
+                method = "K-means"
+              )
+            }
+            else if (input$batchClusterMethod == "FlowSOM") {
+              tryCatch({
+                # Create a flowFrame from the matrix with proper marker names
+                marker_matrix <- as.matrix(marker_data)
+                colnames(marker_matrix) <- input$batchSelectedMarkers
+                fcs_data <- flowCore::flowFrame(marker_matrix)
+                
+                # Set proper column names in the flowFrame parameters
+                params <- flowCore::parameters(fcs_data)
+                params$name <- input$batchSelectedMarkers
+                params$desc <- input$batchSelectedMarkers
+                flowCore::parameters(fcs_data) <- params
+                
+                # Use ReadInput to prepare the data for FlowSOM
+                fsom_input <- FlowSOM::ReadInput(fcs_data, transform = FALSE, scale = FALSE)
+                
+                # Add logging and notification
+                logInfo <- paste("Running FlowSOM with grid", input$batchSomXdim, "x", input$batchSomYdim, 
+                                "training for", input$batchSomRlen, "iterations, forming", input$batchSomClusters, "clusters")
+                print(logInfo)
+                showNotification(logInfo, type = "message", duration = 3)
+                
+                # Build the SOM with user-defined grid dimensions
+                fsom <- FlowSOM::BuildSOM(fsom_input, 
+                                         xdim = input$batchSomXdim, 
+                                         ydim = input$batchSomYdim,
+                                         rlen = input$batchSomRlen)
+                
+                # Get metaclusters using the user-specified number of clusters
+                metacl <- FlowSOM::MetaClustering(fsom$map$codes, 
+                                                 method = "metaClustering_consensus",
+                                                 max = input$batchSomClusters)
+                
+                # Map cells to SOM clusters
+                cell_som_clusters <- fsom$map$mapping[,1]
+                # Then map to metaclusters
+                cell_metaclusters <- metacl[cell_som_clusters]
+                
+                # Calculate metacluster centers
+                unique_clusters <- sort(unique(cell_metaclusters))
+                centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(marker_data))
+                
+                for (i in seq_along(unique_clusters)) {
+                  cluster_idx <- which(cell_metaclusters == unique_clusters[i])
+                  if (length(cluster_idx) > 0) {
+                    centers[i,] <- colMeans(marker_data[cluster_idx, , drop = FALSE])
+                  }
+                }
+                
+                colnames(centers) <- input$batchSelectedMarkers
+                rownames(centers) <- paste("Cluster", unique_clusters)
+                
+                cluster_results <- list(
+                  cluster_ids = cell_metaclusters,
+                  centers = centers,
+                  method = "FlowSOM"
+                )
+              }, error = function(e) {
+                showNotification(paste("FlowSOM clustering error:", e$message), type = "error")
+                cluster_results <- NULL
+              })
+            }
+            else if (input$batchClusterMethod == "DBSCAN") {
+              tryCatch({
+                # Scale data for DBSCAN
+                scaled_markers <- scale(marker_data)
+                
+                # Log the number of cells for debugging
+                logInfo <- paste("Running DBSCAN on", nrow(scaled_markers), "cells with eps =", 
+                               input$batchDbscanEps, "and minPts =", input$batchDbscanMinPts)
+                print(logInfo)
+                
+                # Run DBSCAN
+                dbscan_result <- dbscan::dbscan(scaled_markers, eps = input$batchDbscanEps, 
+                                              minPts = input$batchDbscanMinPts)
+                cluster_ids <- dbscan_result$cluster
+                
+                # Handle noise points (cluster ID = 0)
+                # Assign them to a new cluster (max cluster ID + 1)
+                if (any(cluster_ids == 0)) {
+                  max_cluster <- max(cluster_ids)
+                  cluster_ids[cluster_ids == 0] <- max_cluster + 1
+                }
+                
+                # Calculate cluster centers
+                unique_clusters <- sort(unique(cluster_ids))
+                centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(marker_data))
+                
+                for (i in seq_along(unique_clusters)) {
+                  cluster_idx <- which(cluster_ids == unique_clusters[i])
+                  if (length(cluster_idx) > 0) {
+                    centers[i,] <- colMeans(marker_data[cluster_idx, , drop = FALSE])
+                  }
+                }
+                
+                colnames(centers) <- input$batchSelectedMarkers
+                rownames(centers) <- paste("Cluster", unique_clusters)
+                
+                cluster_results <- list(
+                  cluster_ids = cluster_ids,
+                  centers = centers,
+                  method = "DBSCAN"
+                )
+              }, error = function(e) {
+                showNotification(paste("DBSCAN clustering error:", e$message), type = "error")
+                cluster_results <- NULL
+              })
+            }
+            else if (input$batchClusterMethod == "Phenograph") {
+              tryCatch({
+                # Determine appropriate k based on dataset size
+                # For larger datasets, we can use larger k
+                cell_count <- nrow(marker_data)
+                
+                # Adjust k if dataset is very small
+                actual_k <- min(input$batchPhenoK, max(5, cell_count / 15))
+                
+                # Log the number of cells for debugging
+                logInfo <- paste("Running Phenograph on", cell_count, "cells with k =", actual_k)
+                print(logInfo)
+                
+                # Run Phenograph
+                pheno_result <- Rphenograph(as.matrix(marker_data), k = actual_k)
+                
+                # Get cluster IDs
+                cluster_ids <- as.numeric(membership(pheno_result[[2]]))
+                
+                # Calculate cluster centers
+                unique_clusters <- sort(unique(cluster_ids))
+                centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(marker_data))
+                
+                for (i in seq_along(unique_clusters)) {
+                  cluster_idx <- which(cluster_ids == unique_clusters[i])
+                  if (length(cluster_idx) > 0) {
+                    centers[i,] <- colMeans(marker_data[cluster_idx, , drop = FALSE])
+                  }
+                }
+                
+                colnames(centers) <- input$batchSelectedMarkers
+                rownames(centers) <- paste("Cluster", unique_clusters)
+                
+                cluster_results <- list(
+                  cluster_ids = cluster_ids,
+                  centers = centers,
+                  method = "Phenograph"
+                )
+              }, error = function(e) {
+                showNotification(paste("Phenograph clustering error:", e$message), type = "error")
+                cluster_results <- NULL
+              })
+            }
+            
+            # Identify cell populations if enabled
+            populations <- NULL
+            if (input$batchIdentifyPops && !is.null(cluster_results)) {
+              incProgress(0.8, detail = "Identifying cell populations...")
+              
+              # Get cluster centers and marker names
+              centers <- cluster_results$centers
+              marker_names <- colnames(centers)
+              
+              # Identify populations using the existing function
+              populations <- identify_cell_populations(
+                centers, 
+                marker_names,
+                high_threshold = input$batchHighExpressionThreshold,
+                low_threshold = input$batchLowExpressionThreshold,
+                min_confidence = input$batchMinConfidenceThreshold/100  # Convert from percentage
+              )
+            }
+            
+            # Add cluster IDs to plot data if clustering was successful
+            if (!is.null(cluster_results)) {
+              plot_data$Cluster <- as.factor(cluster_results$cluster_ids)
+              
+              # Add populations if identified
+              if (!is.null(populations)) {
+                # Map cluster IDs to population names
+                population_map <- setNames(
+                  populations$Population,
+                  populations$Cluster
+                )
+                
+                # Add population column to plot data
+                plot_data$Population <- population_map[as.character(plot_data$Cluster)]
+              }
+            }
+          }
+          
+          # Store final results
+          sample_result <- list(
+            id = sample$id,
+            name = sample$name,
+            group = sample$group,
+            preprocess_results = preprocess_results,
+            plot_data = plot_data,
+            cluster_results = cluster_results,
+            populations = populations,
+            dim_red_method = input$batchDimRedMethod,
+            num_cells = nrow(plot_data),
+            processed_time = Sys.time()
+          )
+          
+          return(sample_result)
+        }
+      )
+    }
+    
+    # Process each sample
+    withProgress(
+      message = "Running batch analysis",
+      value = 0, 
+      {
+        for (i in seq_along(samples)) {
+          incProgress(amount = 1/length(samples), 
+                     detail = paste("Processing sample", i, "of", length(samples)))
+          
+          sample <- samples[[i]]
+          result <- processSample(sample)
+          results[[sample$id]] <- result
+        }
+      }
+    )
+    
+    # Update results
+    batchResults(results)
+    
+    # Update sample selection dropdown for visualization
+    updateSelectInput(session, "viewSample", 
+                    choices = setNames(
+                      names(results),
+                      sapply(results, function(r) r$name)
+                    ))
+    
+    # Update comparison dropdowns
+    control_ids <- c()
+    treated_ids <- c()
+    control_names <- c()
+    treated_names <- c()
+    
+    # Loop through results to find control and treated samples
+    for (id in names(results)) {
+      sample <- results[[id]]
+      if (sample$group == "Control") {
+        control_ids <- c(control_ids, id)
+        control_names <- c(control_names, sample$name)
+      } else if (sample$group == "Treated") {
+        treated_ids <- c(treated_ids, id)
+        treated_names <- c(treated_names, sample$name)
+      }
+    }
+    
+    if (length(control_ids) > 0) {
+      updateSelectInput(session, "compareViewControl", 
+                        choices = setNames(control_ids, control_names))
+    }
+    
+    if (length(treated_ids) > 0) {
+      updateSelectInput(session, "compareViewTreated",
+                        choices = setNames(treated_ids, treated_names))
+    }
+    
+    # Update metrics view sample selector
+    updateSelectInput(session, "metricsViewSample",
+                     choices = setNames(
+                       names(results),
+                       sapply(results, function(r) r$name)
+                     ))
+    
+    # Update marker comparison dropdown
+    if (length(results) > 0) {
+      # Get all marker columns across samples
+      all_markers <- unique(unlist(lapply(results, function(r) {
+        setdiff(colnames(r$plot_data), c("dim1", "dim2", "Cluster", "Population"))
+      })))
+      
+      # Update the dropdown
+      if (length(all_markers) > 0) {
+        updateSelectInput(session, "markerCompare", choices = all_markers)
+      }
+    }
+    
+    # Show batch analysis completion notification
+    showNotification(paste("Batch analysis complete for", length(samples), "samples"), 
+                    type = "message", 
+                    duration = 5)
+  })
+  
+  # Single sample view title
+  output$sampleViewTitle <- renderText({
+    req(input$viewSample)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$viewSample]])) {
+      return("No sample selected")
+    }
+    
+    sample <- results[[input$viewSample]]
+    paste0(sample$name, " (", sample$group, ")")
+  })
+  
+  # Render individual sample dimensionality reduction plot
+  output$sampleDimensionalityPlot <- renderPlotly({
+    req(input$viewSample)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$viewSample]])) {
+      return(NULL)
+    }
+    
+    sample <- results[[input$viewSample]]
+    plot_data <- sample$plot_data
+    
+    # If clustering was performed, color by cluster
+    if (!is.null(sample$cluster_results) && "Cluster" %in% colnames(plot_data)) {
+      # Create hover text based on available information
+      if ("Population" %in% colnames(plot_data)) {
+        hover_text <- paste(
+          "Cluster:", plot_data$Cluster,
+          "<br>Population:", plot_data$Population,
+          "<br>", sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+          "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+        )
+      } else {
+        hover_text <- paste(
+          "Cluster:", plot_data$Cluster,
+          "<br>", sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+          "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+        )
+      }
+      
+      # Create a ggplot object first
+      p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = Cluster, text = hover_text)) +
+        geom_point(alpha = 0.7, size = plot_settings$point_size/2) +
+        get_color_palette() +
+        labs(
+          title = paste(sample$dim_red_method, "Plot Colored by Cluster"),
+          x = paste(sample$dim_red_method, "1"),
+          y = paste(sample$dim_red_method, "2"),
+          color = "Cluster"
+        ) +
+        get_standard_theme()
+      
+      # Convert to plotly
+      ggplotly(p, tooltip = "text") %>% 
+        layout(
+          height = plot_settings$height, 
+          width = plot_settings$width,
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(family = "Arial", size = plot_settings$font_size)
+          )
+        )
+    } else {
+      # If no clustering, create a simple plot
+      hover_text <- paste(
+        sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+        "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+      )
+      
+      # If we have markers, add them to hover
+      for (marker in input$batchSelectedMarkers) {
+        if (marker %in% colnames(plot_data)) {
+          hover_text <- paste0(hover_text, "<br>", marker, ": ", round(plot_data[[marker]], 2))
+        }
+      }
+      
+      # Create a ggplot object first
+      p <- ggplot(plot_data, aes(x = dim1, y = dim2, text = hover_text)) +
+        geom_point(alpha = 0.7, size = plot_settings$point_size/2, color = "#3366CC") +
+        labs(
+          title = paste(sample$dim_red_method, "Plot"),
+          x = paste(sample$dim_red_method, "1"),
+          y = paste(sample$dim_red_method, "2")
+        ) +
+        get_standard_theme()
+      
+      # Convert to plotly
+      ggplotly(p, tooltip = "text") %>% 
+        layout(
+          height = plot_settings$height, 
+          width = plot_settings$width,
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(family = "Arial", size = plot_settings$font_size)
+          )
+        )
+    }
+  })
+  
+  # Render sample cluster plot
+  output$sampleClusterPlot <- renderPlotly({
+    req(input$viewSample)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$viewSample]])) {
+      return(NULL)
+    }
+    
+    sample <- results[[input$viewSample]]
+    if (is.null(sample$cluster_results) || !("Cluster" %in% colnames(sample$plot_data))) {
+      return(NULL)
+    }
+    
+    plot_data <- sample$plot_data
+    
+    # Create hover text based on available information
+    if ("Population" %in% colnames(plot_data)) {
+      hover_text <- paste(
+        "Cluster:", plot_data$Cluster,
+        "<br>Population:", plot_data$Population,
+        "<br>", sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+        "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+      )
+    } else {
+      hover_text <- paste(
+        "Cluster:", plot_data$Cluster,
+        "<br>", sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+        "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+      )
+    }
+    
+    p <- plot_ly(plot_data, x = ~dim1, y = ~dim2, color = ~Cluster,
+                text = hover_text, type = "scatter", mode = "markers",
+                marker = list(size = 8, opacity = 0.7)) %>%
+      layout(
+        title = paste("Cluster Plot -", sample$cluster_results$method),
+        xaxis = list(title = paste(sample$dim_red_method, "1")),
+        yaxis = list(title = paste(sample$dim_red_method, "2")),
+        colorbar = list(title = "Cluster")
+      )
+    
+    return(p)
+  })
+  
+  # Render sample heatmap
+  output$sampleHeatmap <- renderPlot({
+    req(input$viewSample)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$viewSample]])) {
+      return(NULL)
+    }
+    
+    sample <- results[[input$viewSample]]
+    if (is.null(sample$cluster_results) || is.null(sample$cluster_results$centers)) {
+      return(NULL)
+    }
+    
+    # Get cluster centers
+    centers <- sample$cluster_results$centers
+    
+    # Add population labels to heatmap if available
+    if (!is.null(sample$populations) && input$batchShowPopLabels) {
+      # Create a mapping of cluster IDs to population names
+      pop_mapping <- setNames(
+        sample$populations$Population,
+        sample$populations$Cluster
+      )
+      
+      # Add population names to row names
+      rownames(centers) <- paste(rownames(centers), "-", 
+                                pop_mapping[rownames(centers)])
+    }
+    
+    # Convert to long format for heatmap
+    centers_long <- reshape2::melt(centers)
+    colnames(centers_long) <- c("Cluster", "Marker", "Value")
+    
+    # Create the heatmap
+    ggplot(centers_long, aes(x = Marker, y = Cluster, fill = Value)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+      labs(
+        title = paste("Marker Expression by Cluster -", sample$name),
+        fill = "Expression"
+      ) +
+      get_standard_theme() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = plot_settings$font_size * 1.2)
+      )
+  },
+  width = function() plot_settings$width,
+  height = function() plot_settings$height)
+  
+  # Render sample cluster statistics
+  output$sampleClusterStats <- DT::renderDataTable({
+    req(input$viewSample)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$viewSample]])) {
+      return(NULL)
+    }
+    
+    sample <- results[[input$viewSample]]
+    if (is.null(sample$cluster_results) || !("Cluster" %in% colnames(sample$plot_data))) {
+      return(NULL)
+    }
+    
+    # Calculate cluster statistics
+    plot_data <- sample$plot_data
+    
+    # Calculate cluster frequencies
+    cluster_counts <- table(plot_data$Cluster)
+    total_cells <- nrow(plot_data)
+    
+    # Create data frame for statistics
+    stats_df <- data.frame(
+      Cluster = names(cluster_counts),
+      Count = as.numeric(cluster_counts),
+      Percentage = round(as.numeric(cluster_counts) / total_cells * 100, 2)
+    )
+    
+    # Add population information if available
+    if (!is.null(sample$populations) && input$batchShowPopLabels) {
+      pop_info <- sample$populations
+      
+      # Match cluster IDs to get population names
+      stats_df$Population <- pop_info$Population[match(stats_df$Cluster, pop_info$Cluster)]
+      stats_df$Confidence <- pop_info$Confidence[match(stats_df$Cluster, pop_info$Cluster)]
+      
+      # Reorder columns
+      stats_df <- stats_df[, c("Cluster", "Population", "Count", "Percentage", "Confidence")]
+    }
+    
+    DT::datatable(
+      stats_df,
+      options = list(
+        pageLength = 15,
+        scrollX = TRUE
+      ),
+      rownames = FALSE,
+      caption = paste("Cluster Statistics for", sample$name)
+    ) %>% formatRound(columns = c("Percentage", "Confidence"), digits = 2)
+  })
+  
+  # Render comparison plots between control and treated samples
+  output$controlSamplePlot <- renderPlotly({
+    req(input$compareViewControl)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$compareViewControl]])) {
+      return(NULL)
+    }
+    
+    sample <- results[[input$compareViewControl]]
+    plot_data <- sample$plot_data
+    
+    # If clustering was performed, color by cluster
+    if (!is.null(sample$cluster_results) && "Cluster" %in% colnames(plot_data)) {
+      # Create hover text with cluster info
+      hover_text <- paste(
+        "Cluster:", plot_data$Cluster,
+        "<br>", sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+        "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+      )
+      
+      # Add population if available
+      if ("Population" %in% colnames(plot_data)) {
+        hover_text <- paste0(hover_text, "<br>Population: ", plot_data$Population)
+      }
+      
+      p <- plot_ly(plot_data, x = ~dim1, y = ~dim2, color = ~Cluster,
+                  text = hover_text, type = "scatter", mode = "markers",
+                  marker = list(size = 7, opacity = 0.7)) %>%
+        layout(
+          title = paste("Control:", sample$name),
+          xaxis = list(title = paste(sample$dim_red_method, "1")),
+          yaxis = list(title = paste(sample$dim_red_method, "2")),
+          showlegend = FALSE
+        )
+    } else {
+      # If no clustering, create a simple plot
+      hover_text <- paste(
+        sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+        "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+      )
+      
+      p <- plot_ly(plot_data, x = ~dim1, y = ~dim2,
+                  text = hover_text, type = "scatter", mode = "markers",
+                  marker = list(size = 7, opacity = 0.7, color = "#3366CC")) %>%
+        layout(
+          title = paste("Control:", sample$name),
+          xaxis = list(title = paste(sample$dim_red_method, "1")),
+          yaxis = list(title = paste(sample$dim_red_method, "2"))
+        )
+    }
+    
+    return(p)
+  })
+  
+  output$treatedSamplePlot <- renderPlotly({
+    req(input$compareViewTreated)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$compareViewTreated]])) {
+      return(NULL)
+    }
+    
+    sample <- results[[input$compareViewTreated]]
+    plot_data <- sample$plot_data
+    
+    # If clustering was performed, color by cluster
+    if (!is.null(sample$cluster_results) && "Cluster" %in% colnames(plot_data)) {
+      # Create hover text with cluster info
+      hover_text <- paste(
+        "Cluster:", plot_data$Cluster,
+        "<br>", sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+        "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+      )
+      
+      # Add population if available
+      if ("Population" %in% colnames(plot_data)) {
+        hover_text <- paste0(hover_text, "<br>Population: ", plot_data$Population)
+      }
+      
+      p <- plot_ly(plot_data, x = ~dim1, y = ~dim2, color = ~Cluster,
+                  text = hover_text, type = "scatter", mode = "markers",
+                  marker = list(size = 7, opacity = 0.7)) %>%
+        layout(
+          title = paste("Treated:", sample$name),
+          xaxis = list(title = paste(sample$dim_red_method, "1")),
+          yaxis = list(title = paste(sample$dim_red_method, "2"))
+        )
+    } else {
+      # If no clustering, create a simple plot
+      hover_text <- paste(
+        sample$dim_red_method, "1:", round(plot_data$dim1, 2),
+        "<br>", sample$dim_red_method, "2:", round(plot_data$dim2, 2)
+      )
+      
+      p <- plot_ly(plot_data, x = ~dim1, y = ~dim2,
+                  text = hover_text, type = "scatter", mode = "markers",
+                  marker = list(size = 7, opacity = 0.7, color = "#FF6633")) %>%
+        layout(
+          title = paste("Treated:", sample$name),
+          xaxis = list(title = paste(sample$dim_red_method, "1")),
+          yaxis = list(title = paste(sample$dim_red_method, "2"))
+        )
+    }
+    
+    return(p)
+  })
+  
+  
+  # Update marker dropdown for single sample view
+  observe({
+    req(input$viewSample)
+    results <- batchResults()
+    if (is.null(results) || is.null(results[[input$viewSample]])) {
+      return()
+    }
+    
+    sample <- results[[input$viewSample]]
+    markers <- input$batchSelectedMarkers
+    
+    updateSelectInput(session, "sampleMarkerSelect", 
+                     choices = markers,
+                     selected = markers[1])
+  })
+  
+  # Single sample marker expression by cluster
+  output$markerExpressionByCluster <- renderPlotly({
+    req(input$viewSample, input$sampleMarkerSelect)
+    results <- batchResults()
+    
+    if (is.null(results) || is.null(results[[input$viewSample]]) || 
+        is.null(results[[input$viewSample]]$cluster_results)) {
+      return(NULL)
+    }
+    
+    sample <- results[[input$viewSample]]
+    marker <- input$sampleMarkerSelect
+    
+    # Check if marker exists in sample data
+    if (!(marker %in% colnames(sample$plot_data))) {
+      return(NULL)
+    }
+    
+    # Create a boxplot of marker expression by cluster
+    plot_data <- sample$plot_data
+    
+    # Create hover text
+    hover_text <- paste(
+      "Cluster:", plot_data$Cluster,
+      "<br>", marker, ":", round(plot_data[[marker]], 2)
+    )
+    
+    # Add population info if available
+    if ("Population" %in% colnames(plot_data)) {
+      hover_text <- paste0(hover_text, "<br>Population: ", plot_data$Population)
+    }
+    
+    # Calculate summary stats for each cluster
+    cluster_stats <- plot_data %>%
+      group_by(Cluster) %>%
+      summarize(
+        Median = median(.data[[marker]], na.rm = TRUE),
+        Mean = mean(.data[[marker]], na.rm = TRUE),
+        Max = max(.data[[marker]], na.rm = TRUE),
+        Min = min(.data[[marker]], na.rm = TRUE),
+        Q1 = quantile(.data[[marker]], 0.25, na.rm = TRUE),
+        Q3 = quantile(.data[[marker]], 0.75, na.rm = TRUE),
+        Count = n(),
+        .groups = 'drop'
+      ) %>%
+      arrange(Mean)  # Sort by mean expression
+    
+    # Create a violin plot with boxplot overlay
+    p <- plot_ly() %>%
+      add_trace(
+        data = cluster_stats,
+        x = ~reorder(Cluster, Mean),
+        y = ~Mean,
+        type = "scatter",
+        mode = "markers",
+        name = "Mean",
+        marker = list(color = "red", size = 10, symbol = "diamond")
+      )
+    
+    # Add violin plots for each cluster
+    for (cluster in unique(plot_data$Cluster)) {
+      # Subset data for this cluster
+      cluster_data <- plot_data[plot_data$Cluster == cluster, ]
+      
+      # Add violin trace
+      p <- p %>% add_trace(
+        x = rep(cluster, nrow(cluster_data)),
+        y = cluster_data[[marker]],
+        type = "violin",
+        name = paste("Cluster", cluster),
+        box = list(visible = TRUE),
+        meanline = list(visible = TRUE),
+        legendgroup = cluster,
+        showlegend = FALSE,
+        hoverinfo = "skip"
+      )
+    }
+    
+    # Apply layout
+    p <- p %>% layout(
+      title = paste("Distribution of", marker, "by Cluster"),
+      xaxis = list(title = "Cluster"),
+      yaxis = list(title = marker),
+      violinmode = "group",
+      hovermode = "closest"
+    )
+    
+    return(p)
+  })
+  
+  # Update cluster comparison dropdowns
+  observe({
+    results <- batchResults()
+    if (is.null(results)) return()
+    
+    # Get control and treated samples
+    control_ids <- c()
+    treated_ids <- c()
+    control_names <- c()
+    treated_names <- c()
+    
+    # Loop through results to find control and treated samples
+    for (id in names(results)) {
+      sample <- results[[id]]
+      if (sample$group == "Control") {
+        control_ids <- c(control_ids, id)
+        control_names <- c(control_names, sample$name)
+      } else if (sample$group == "Treated") {
+        treated_ids <- c(treated_ids, id)
+        treated_names <- c(treated_names, sample$name)
+      }
+    }
+    
+    # Update control dropdown
+    if (length(control_ids) > 0) {
+      updateSelectInput(session, "clusterCompareControl", 
+                       choices = setNames(control_ids, control_names))
+    }
+    
+    # Update treated dropdown
+    if (length(treated_ids) > 0) {
+      updateSelectInput(session, "clusterCompareTreated",
+                       choices = setNames(treated_ids, treated_names))
+    }
+  })
+  
+  # Cluster mapping heatmap
+  output$clusterMappingHeatmap <- renderPlot({
+    req(input$clusterCompareControl, input$clusterCompareTreated)
+    results <- batchResults()
+    
+    if (is.null(results) || is.null(results[[input$clusterCompareControl]]) || 
+        is.null(results[[input$clusterCompareTreated]])) {
+      return(NULL)
+    }
+    
+    # Get the samples
+    control_sample <- results[[input$clusterCompareControl]]
+    treated_sample <- results[[input$clusterCompareTreated]]
+    
+    # Check if clustering was performed for both samples
+    if (is.null(control_sample$cluster_results) || is.null(treated_sample$cluster_results)) {
+      return(NULL)
+    }
+    
+    # Get cluster centers
+    control_centers <- control_sample$cluster_results$centers
+    treated_centers <- treated_sample$cluster_results$centers
+    
+    # Calculate similarity matrix
+    similarity_matrix <- matrix(NA, 
+                              nrow = nrow(control_centers), 
+                              ncol = nrow(treated_centers))
+    
+    for (i in 1:nrow(control_centers)) {
+      for (j in 1:nrow(treated_centers)) {
+        # Calculate Euclidean distance between cluster centers
+        dist_val <- sqrt(sum((control_centers[i,] - treated_centers[j,])^2))
+        # Convert distance to similarity (invert)
+        similarity_matrix[i,j] <- 1 / (1 + dist_val)
+      }
+    }
+    
+    # Set row/column names
+    rownames(similarity_matrix) <- paste0("C", rownames(control_centers))
+    colnames(similarity_matrix) <- paste0("T", rownames(treated_centers))
+    
+    # Add population labels if available
+    if (!is.null(control_sample$populations) && !is.null(treated_sample$populations)) {
+      # Get population mappings
+      control_pop_map <- setNames(
+        control_sample$populations$Population,
+        paste0("C", control_sample$populations$Cluster)
+      )
+      
+      treated_pop_map <- setNames(
+        treated_sample$populations$Population,
+        paste0("T", treated_sample$populations$Cluster)
+      )
+      
+      # Update row/column names with population information
+      rownames(similarity_matrix) <- paste0(rownames(similarity_matrix), " (", 
+                                         control_pop_map[rownames(similarity_matrix)], ")")
+      
+      colnames(similarity_matrix) <- paste0(colnames(similarity_matrix), " (", 
+                                         treated_pop_map[colnames(similarity_matrix)], ")")
+    }
+    
+    # Convert to data frame for ggplot
+    sim_df <- reshape2::melt(similarity_matrix, varnames = c("Control", "Treated"), 
+                           value.name = "Similarity")
+    
+    # Get color palette based on settings
+    palette_colors <- switch(plot_settings$color_palette,
+                           "viridis" = viridisLite::viridis(10),
+                           "plasma" = viridisLite::plasma(10),
+                           "blues" = colorRampPalette(c("white", "darkblue"))(10),
+                           "reds" = colorRampPalette(c("white", "darkred"))(10),
+                           viridisLite::viridis(10))  # Default
+    
+    # Create heatmap
+    ggplot(sim_df, aes(x = Treated, y = Control, fill = Similarity)) +
+      geom_tile() +
+      scale_fill_gradientn(colors = palette_colors) +
+      get_standard_theme() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = plot_settings$font_size * 0.8),
+        axis.text.y = element_text(size = plot_settings$font_size * 0.8),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = plot_settings$font_size * 1.2)
+      ) +
+      labs(
+        title = "Cluster Similarity Between Control and Treated Samples",
+        subtitle = paste(control_sample$name, "vs", treated_sample$name),
+        fill = "Similarity"
+      ) +
+      geom_text(aes(label = sprintf("%.2f", Similarity)), size = plot_settings$font_size * 0.25)
+  },
+  width = function() plot_settings$width,
+  height = function() plot_settings$height)
+  
+  # Signature marker heatmap
+  output$signatureMarkerHeatmap <- renderPlot({
+    req(input$clusterCompareControl, input$clusterCompareTreated)
+    results <- batchResults()
+    
+    if (is.null(results) || is.null(results[[input$clusterCompareControl]]) || 
+        is.null(results[[input$clusterCompareTreated]])) {
+      return(NULL)
+    }
+    
+    # Get the samples
+    control_sample <- results[[input$clusterCompareControl]]
+    treated_sample <- results[[input$clusterCompareTreated]]
+    
+    # Check if clustering was performed for both samples
+    if (is.null(control_sample$cluster_results) || is.null(treated_sample$cluster_results)) {
+      return(NULL)
+    }
+    
+    # Get markers
+    markers <- input$batchSelectedMarkers
+    
+    # Combine cluster centers from both samples
+    control_centers <- control_sample$cluster_results$centers
+    treated_centers <- treated_sample$cluster_results$centers
+    
+    # Create combined centers data frame
+    control_df <- as.data.frame(control_centers) %>%
+      tibble::rownames_to_column("Cluster") %>%
+      mutate(Sample = "Control", 
+             ClusterID = paste0("C", Cluster))
+    
+    treated_df <- as.data.frame(treated_centers) %>%
+      tibble::rownames_to_column("Cluster") %>%
+      mutate(Sample = "Treated", 
+             ClusterID = paste0("T", Cluster))
+    
+    # Combine data
+    combined_centers <- bind_rows(control_df, treated_df)
+    
+    # Add population labels if available
+    if (!is.null(control_sample$populations) && !is.null(treated_sample$populations)) {
+      # Create mapping for control populations
+      control_pop_map <- setNames(
+        control_sample$populations$Population,
+        control_sample$populations$Cluster
+      )
+      
+      # Create mapping for treated populations
+      treated_pop_map <- setNames(
+        treated_sample$populations$Population,
+        treated_sample$populations$Cluster
+      )
+      
+      # Add population column
+      combined_centers$Population <- NA
+      for (i in 1:nrow(combined_centers)) {
+        if (combined_centers$Sample[i] == "Control") {
+          combined_centers$Population[i] <- control_pop_map[combined_centers$Cluster[i]]
+        } else {
+          combined_centers$Population[i] <- treated_pop_map[combined_centers$Cluster[i]]
+        }
+      }
+      
+      # Update ClusterID with population
+      combined_centers$ClusterID <- paste0(combined_centers$ClusterID, " (", 
+                                         combined_centers$Population, ")")
+    }
+    
+    # Convert to long format
+    combined_long <- combined_centers %>%
+      select(-Cluster, -Population) %>%
+      pivot_longer(cols = all_of(markers), names_to = "Marker", values_to = "Expression")
+    
+    # Scale expression values for heatmap
+    combined_scaled <- combined_long %>%
+      group_by(Marker) %>%
+      mutate(Scaled_Expr = scale(Expression)[,1]) %>%
+      ungroup()
+    
+    # Create the heatmap
+    ggplot(combined_scaled, aes(x = Marker, y = ClusterID, fill = Scaled_Expr)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "navy", mid = "white", high = "firebrick3", midpoint = 0) +
+      facet_grid(Sample ~ ., scales = "free_y", space = "free_y") +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
+        axis.text.y = element_text(size = 14),
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 14, face = "bold"),
+        strip.background = element_rect(fill = "lightgray", color = NA),
+        plot.title = element_text(hjust = 0.5, size = 14)
+      ) +
+      labs(
+        title = "Marker Expression Profiles by Cluster",
+        subtitle = paste(control_sample$name, "vs", treated_sample$name),
+        x = "Marker",
+        y = "Cluster",
+        fill = "Z-score"
+      )
+  })
+  
+  # Make Raw Data Analysis visualization options affect plots directly
+  observe({
+    # Only update when explicitly changed in Raw Data tab to avoid conflicts with global settings
+    if (!is.null(input$plotWidth) && !is.null(input$plotHeight)) {
+      isolate({
+        plot_settings$width <- input$plotWidth
+        plot_settings$height <- input$plotHeight
+      })
+    }
   })
 }
 
