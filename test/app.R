@@ -447,7 +447,19 @@ ui <- fluidPage(
                  # Dimensionality reduction parameters
                  conditionalPanel(
                    condition = "input.methods.includes('t-SNE')",
-                   numericInput("perplexity", "t-SNE Perplexity", value = 30, min = 5, max = 50)
+                   numericInput("perplexity", "t-SNE Perplexity", value = 30, min = 5, max = 50),
+                   checkboxInput("use_barnes_hut", "Use Barnes-Hut Approximation (faster)", value = TRUE),
+                   conditionalPanel(
+                     condition = "input.use_barnes_hut",
+                     sliderInput("tsne_theta", "Barnes-Hut theta (higher theta = speed, lower theta = accuracy)", 
+                                 min = 0.0, max = 1.0, value = 0.5, step = 0.1)
+                   ),
+                  conditionalPanel(
+                     condition = "!input.use_barnes_hut",
+                     tags$div(class = "alert alert-warning",
+                              "Warning: Exact t-SNE is very slow for datasets > 1000 cells.")
+                   ),
+                   numericInput("tsne_max_iter", "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
                  ),
                  conditionalPanel(
                    condition = "input.methods.includes('UMAP')",
@@ -656,7 +668,19 @@ ui <- fluidPage(
                              choices = c("t-SNE", "UMAP"), selected = "t-SNE"),
                  conditionalPanel(
                    condition = "input.batchDimRedMethod === 't-SNE'",
-                   sliderInput("batchPerplexity", "t-SNE perplexity", min = 5, max = 50, value = 30)
+                   sliderInput("batchPerplexity", "t-SNE perplexity", min = 5, max = 50, value = 30),
+                   checkboxInput("batch_use_barnes_hut", "Use Barnes-Hut Approximation (faster)", value = TRUE),
+                   conditionalPanel(
+                     condition = "input.batch_use_barnes_hut",
+                     sliderInput("batchTsneTheta", "Barnes-Hut theta (higher theta = speed, lower theta = accuracy)", 
+                                 min = 0.0, max = 1.0, value = 0.5, step = 0.1)
+                   ),
+                   conditionalPanel(
+                     condition = "!input.batch_use_barnes_hut",
+                     tags$div(class = "alert alert-warning",
+                              "Warning: Exact t-SNE is very slow for datasets > 1000 cells.")
+                   ),
+                   numericInput("batch_tsne_max_iter", "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
                  ),
                  conditionalPanel(
                    condition = "input.batchDimRedMethod === 'UMAP'",
@@ -1141,7 +1165,31 @@ server <- function(input, output, session) {
       
       if ("t-SNE" %in% input$methods) {
         incProgress(0.4, detail = "Running t-SNE...")
-        tsne_result <- Rtsne(preprocessing_results$scaled_data, dims = 2, perplexity = input$perplexity, verbose = FALSE)
+        
+        # Ensure the data is a matrix
+        data_matrix <- as.matrix(preprocessing_results$scaled_data)
+        
+        # Prepare t-SNE parameters
+        tsne_params <- list(
+          dims = 2,
+          perplexity = input$perplexity,
+          max_iter = input$tsne_max_iter,
+          verbose = FALSE
+        )
+        
+        if (input$use_barnes_hut) {
+          # Use Barnes-Hut t-SNE
+          tsne_params$theta <- input$tsne_theta
+          incProgress(0.1, detail = "Running Barnes-Hut t-SNE...")
+        } else {
+          # Use exact t-SNE (very slow for large datasets)
+          tsne_params$theta <- 0.0  # This triggers exact t-SNE
+          incProgress(0.1, detail = "Running exact t-SNE (may be slow)...")
+        }
+        
+        # Run t-SNE with the configured parameters
+        tsne_result <- do.call(Rtsne, c(list(X = data_matrix), tsne_params))
+        
         results$tsne <- data.frame(tsne1 = tsne_result$Y[,1], tsne2 = tsne_result$Y[,2])
       }
       
@@ -2568,12 +2616,32 @@ server <- function(input, output, session) {
           # Perform dimensionality reduction
           if (input$batchDimRedMethod == "t-SNE") {
             perplexity_value <- min(input$batchPerplexity, max(5, nrow(preprocess_results$scaled_data) / 10))
-            dr_result <- Rtsne(preprocess_results$scaled_data, dims = 2, perplexity = perplexity_value, verbose = FALSE)
+            
+            # Ensure the data is a matrix
+            data_matrix <- as.matrix(preprocess_results$scaled_data)
+            
+            # Prepare t-SNE parameters
+            tsne_params <- list(
+              dims = 2,
+              perplexity = perplexity_value,
+              max_iter = input$batch_tsne_max_iter,
+              verbose = FALSE
+            )
+            
+            if (input$batch_use_barnes_hut) {
+              # Use Barnes-Hut t-SNE
+              tsne_params$theta <- input$batchTsneTheta
+              incProgress(0.1, detail = "Running Barnes-Hut t-SNE...")
+            } else {
+              # Use exact t-SNE (very slow for large datasets)
+              tsne_params$theta <- 0.0  # This triggers exact t-SNE
+              incProgress(0.1, detail = "Running exact t-SNE (may be slow)...")
+            }
+            
+            # Run t-SNE with the configured parameters
+            dr_result <- do.call(Rtsne, c(list(X = data_matrix), tsne_params))
+            
             reduced_data <- data.frame(dim1 = dr_result$Y[,1], dim2 = dr_result$Y[,2])
-          } else {
-            neighbors_value <- min(input$batchNeighbors, max(3, nrow(preprocess_results$scaled_data) / 15))
-            dr_result <- umap(preprocess_results$scaled_data, n_neighbors = neighbors_value)
-            reduced_data <- data.frame(dim1 = dr_result[,1], dim2 = dr_result[,2])
           }
           
           # Create plot data
