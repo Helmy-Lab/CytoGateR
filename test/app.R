@@ -1337,7 +1337,7 @@ server <- function(input, output, session) {
             colsToUse = NULL,  # Use all columns
             xdim = xdim,       # Validated x dimension
             ydim = ydim,       # Validated y dimension
-            rlen = 12,         # Default training length
+            rlen = 15,         # Training length upped from 12 to 15
             silent = FALSE     # Show progress
           )
           
@@ -1691,7 +1691,7 @@ server <- function(input, output, session) {
     "FL1-A" = "CXCR5",
     "FL2-A" = "CX3",
     "FL4-A" = "IGG2",
-    "FL7-A" = "BCI6",
+    "FL7-A" = "BCL6",
     "FL8-A" = "IGG",
     "FL10-A" = "KI67"
   )
@@ -1735,9 +1735,9 @@ server <- function(input, output, session) {
   
   # Function to identify cell populations based on marker expression patterns
   identify_cell_populations <- function(cluster_centers, marker_names, 
-                                        high_threshold = 0.3,  # Lowered from 0.5
-                                        low_threshold = -0.3,  # Raised from -0.5
-                                        min_confidence = 0.2) { # Lowered from 0.3
+                                        high_threshold = 0.5,  
+                                        low_threshold = -0.4,  
+                                        min_confidence = 0.3) { 
     
     # Create results dataframe
     results <- data.frame(
