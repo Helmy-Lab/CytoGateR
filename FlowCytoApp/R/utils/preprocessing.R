@@ -97,7 +97,8 @@ performGating <- function(flow_data, gates = list()) {
   # Default gates
   default_gates <- list(
     debris_gate = c("FSC-A", "SSC-A"),
-    live_dead_gate = NULL
+    live_dead_gate = NULL,
+    live_dead_threshold = 1000
   )
   
   # Merge with user-provided gates
@@ -145,7 +146,7 @@ performGating <- function(flow_data, gates = list()) {
       tryCatch({
         # Create a threshold gate for live cells (lower viability dye)
         # Create gate with proper syntax 
-        gate_ranges <- list(c(-Inf, 1000))  # Threshold value, adjust as needed
+        gate_ranges <- list(c(-Inf, gates$live_dead_threshold))  # Threshold value, adjust as needed
         names(gate_ranges) <- gates$live_dead_gate
         
         live_gate <- rectangleGate(

@@ -151,6 +151,10 @@ visualizationModuleServer <- function(id, plot_data, clustering_results = reacti
             p <- p + scale_color_brewer(palette = "Blues")
           } else if (settings$color_palette == "reds") {
             p <- p + scale_color_brewer(palette = "Reds")
+          } else if (settings$color_palette == "brewer_paired") {
+            p <- p + scale_color_brewer(palette = "Paired")
+          } else if (settings$color_palette == "brewer_brbg") {
+            p <- p + scale_color_brewer(palette = "BrBG")
           }
         } else {
           # Continuous coloring
@@ -166,6 +170,11 @@ visualizationModuleServer <- function(id, plot_data, clustering_results = reacti
             p <- p + scale_color_gradient(low = "lightblue", high = "darkblue")
           } else if (settings$color_palette == "reds") {
             p <- p + scale_color_gradient(low = "lightsalmon", high = "darkred")
+          } else if (settings$color_palette == "brewer_paired") {
+            # For continuous data with categorical palette, use viridis as fallback
+            p <- p + scale_color_viridis_c()
+          } else if (settings$color_palette == "brewer_brbg") {
+            p <- p + scale_color_distiller(palette = "BrBG")
           }
         }
       } else {

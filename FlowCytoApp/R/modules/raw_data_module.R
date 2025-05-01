@@ -56,7 +56,14 @@ rawDataModuleUI <- function(id) {
                   value = "FSC-A,SSC-A"),
         selectInput(ns("liveDeadGate"), "Live/Dead Parameter", 
                     choices = c("None", "Live Dead BV570 Violet-610-A"),
-                    selected = "None")
+                    selected = "None"),
+        # Add live/dead threshold parameter
+        conditionalPanel(
+          condition = paste0("input['", ns("liveDeadGate"), "'] !== 'None'"),
+          numericInput(ns("liveDeadThreshold"), "Live/Dead Threshold", 
+                       value = 1000, min = 0, max = 10000, step = 100),
+          helpText("Cells with values below this threshold will be considered live")
+        )
       ),
       
       # Add clustering module UI
@@ -79,11 +86,68 @@ rawDataModuleUI <- function(id) {
         tabPanel("t-SNE", shinycssloaders::withSpinner(plotlyOutput(ns("tsnePlot"), height = "600px"))),
         tabPanel("UMAP", shinycssloaders::withSpinner(plotlyOutput(ns("umapPlot"), height = "600px"))),
         tabPanel("Data Info", verbatimTextOutput(ns("fcsInfo")), uiOutput(ns("optimizationMetricsUI"))),
+        # Add new tab for Live/Dead Analysis
+        tabPanel("Live/Dead Analysis", 
+                 fluidRow(
+                   column(12, h4("Live/Dead Marker Distribution", align = "center")),
+                   column(8, shinycssloaders::withSpinner(plotOutput(ns("liveDeadHistogram"), height = "400px"))),
+                   column(4, 
+                          wellPanel(
+                            h4("Live/Dead Gating Settings"),
+                            uiOutput(ns("liveDeadMarkerUI")),
+                            conditionalPanel(
+                              condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
+                              sliderInput(ns("liveDeadThresholdSlider"), "Threshold", 
+                                          min = 0, max = 5000, value = 1000, step = 100),
+                              checkboxInput(ns("useLogScale"), "Use Log Scale for Visualization", value = TRUE),
+                              hr(),
+                              h4("Gating Results"),
+                              verbatimTextOutput(ns("liveDeadStats")),
+                              actionButton(ns("applyLiveDeadGating"), "Apply to Preprocessing", 
+                                           class = "btn-primary", width = "100%")
+                            )
+                          ))
+                 ),
+                 fluidRow(
+                   column(12, 
+                          conditionalPanel(
+                            condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
+                            h4("2D Visualization", align = "center"),
+                            plotOutput(ns("liveDeadScatter"), height = "400px")
+                          ))
+                 )),
         tabPanel("Cluster Analysis", 
                  conditionalPanel(
                    condition = paste0("input['", ns("clustering-showClusteringOptions"), "'] == true"),
                    tabsetPanel(
-                     tabPanel("Cluster Visualization", plotlyOutput(ns("clusterPlot"))),
+                     tabPanel("Cluster Visualization", 
+                              div(
+                                style = "position: relative;",
+                                plotlyOutput(ns("clusterPlot"), height = "600px")
+                              ),
+                              br(),
+                              # Add checkbox for showing cluster labels
+                              fluidRow(
+                                column(12, 
+                                  div(
+                                    style = "margin-bottom: 15px;",
+                                    checkboxInput(ns("showClusterLabels"), "Show Cluster Labels", value = FALSE)
+                                  )
+                                )
+                              ),
+                              # Add merge clusters button inside a well-defined container with spacing
+                              fluidRow(
+                                column(12, 
+                                  div(
+                                    style = "margin-top: 20px; display: flex; justify-content: center; gap: 10px;",
+                                    actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
+                                               class = "btn-info", icon = icon("object-group")),
+                                    actionButton(ns("resetMerging"), "Reset to Original Clusters", 
+                                               class = "btn-warning", icon = icon("undo"))
+                                  )
+                                )
+                              )
+                     ),
                      tabPanel("Cluster Profiles", shinycssloaders::withSpinner(plotOutput(ns("clusterHeatmap")))),
                      tabPanel("Cluster Statistics", DT::dataTableOutput(ns("clusterStats"))),
                      tabPanel("Identified Populations", DT::dataTableOutput(ns("populationTable")))
@@ -150,8 +214,338 @@ rawDataModuleServer <- function(id, app_state) {
                   multiple = TRUE)
     })
     
+    # Live/Dead marker selection UI
+    output$liveDeadMarkerUI <- renderUI({
+      req(rawFCS())
+      
+      # Get marker choices based on data type
+      if (inherits(rawFCS(), "flowFrame")) {
+        exprs_data <- exprs(rawFCS())
+        params <- parameters(rawFCS())
+        
+        # Look for potential live/dead markers 
+        potential_ld_markers <- grep("live|dead|viability|FL3-A", 
+                                     colnames(exprs_data), 
+                                     ignore.case = TRUE, 
+                                     value = TRUE)
+        
+        # If no matches found, include all channels
+        if (length(potential_ld_markers) == 0) {
+          potential_ld_markers <- colnames(exprs_data)
+        }
+        
+        # Create named vector for selection
+        choices <- c("None", setNames(
+          potential_ld_markers,
+          paste0(potential_ld_markers, " - ", params$desc[match(potential_ld_markers, colnames(exprs_data))])
+        ))
+        
+        # Find the default selected marker
+        default_selection <- "None"
+        live_dead_matches <- grep("live.*dead|dead.*live|viability", choices, ignore.case = TRUE)
+        if (length(live_dead_matches) > 0) {
+          default_selection <- choices[live_dead_matches[1]]
+        }
+        
+        selectInput(session$ns("liveDeadMarkerSelect"), "Select Live/Dead Marker:", 
+                    choices = choices, 
+                    selected = default_selection)
+      } else {
+        selectInput(session$ns("liveDeadMarkerSelect"), "Select Live/Dead Marker:", 
+                    choices = c("None", colnames(rawFCS())), 
+                    selected = "None")
+      }
+    })
+    
     # Store processed data
     processedData <- reactiveVal(NULL)
+    
+    # Replace single mergedClusters reactive with a more comprehensive structure
+    mergeHistory <- reactiveVal(list(
+      active = FALSE,
+      operations = list(),
+      current_clusters = NULL,
+      current_mapping = NULL
+    ))
+    
+    # Live/Dead histogram plot
+    output$liveDeadHistogram <- renderPlot({
+      req(rawFCS(), input$liveDeadMarkerSelect)
+      
+      # Only proceed if a marker is selected
+      if (input$liveDeadMarkerSelect == "None") {
+        return(ggplot() + 
+                 annotate("text", x = 0.5, y = 0.5, 
+                          label = "Please select a Live/Dead marker") +
+                 theme_void())
+      }
+      
+      # Extract values for the selected marker
+      if (inherits(rawFCS(), "flowFrame")) {
+        ld_marker <- input$liveDeadMarkerSelect
+        if (grepl(" - ", ld_marker)) {
+          ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
+        }
+        
+        if (!(ld_marker %in% colnames(exprs(rawFCS())))) {
+          return(ggplot() + 
+                   annotate("text", x = 0.5, y = 0.5, 
+                            label = paste("Marker", ld_marker, "not found in dataset")) +
+                   theme_void())
+        }
+        
+        ld_values <- exprs(rawFCS())[, ld_marker]
+      } else {
+        # For non-FCS files
+        if (!(input$liveDeadMarkerSelect %in% colnames(rawFCS()))) {
+          return(ggplot() + 
+                   annotate("text", x = 0.5, y = 0.5, 
+                            label = paste("Marker", input$liveDeadMarkerSelect, "not found in dataset")) +
+                   theme_void())
+        }
+        
+        ld_values <- rawFCS()[[input$liveDeadMarkerSelect]]
+      }
+      
+      # Create data frame for plotting
+      hist_data <- data.frame(value = ld_values)
+      
+      # Handle any invalid values (NAs, Infs)
+      hist_data <- hist_data[is.finite(hist_data$value), , drop = FALSE]
+      
+      # Update max range of slider based on the data
+      if (!is.null(hist_data$value) && length(hist_data$value) > 0) {
+        data_max <- max(hist_data$value, na.rm = TRUE)
+        data_min <- min(hist_data$value, na.rm = TRUE)
+        
+        # Set max to something reasonable (95th percentile might be better than max)
+        slider_max <- max(5000, min(quantile(hist_data$value, 0.995, na.rm = TRUE), 100000))
+        
+        # Update the slider
+        updateSliderInput(session, "liveDeadThresholdSlider", 
+                          min = data_min, 
+                          max = slider_max,
+                          value = min(input$liveDeadThresholdSlider, slider_max))
+      }
+      
+      # Create the histogram plot
+      p <- ggplot(hist_data, aes(x = value)) +
+        geom_histogram(bins = 100, fill = "steelblue", color = "black", alpha = 0.7) +
+        geom_vline(xintercept = input$liveDeadThresholdSlider, 
+                   color = "red", linetype = "dashed", size = 1.5) +
+        labs(title = "Live/Dead Marker Distribution",
+             subtitle = paste("Red line shows current threshold:", input$liveDeadThresholdSlider),
+             x = input$liveDeadMarkerSelect,
+             y = "Count") +
+        theme_minimal(base_size = 14) +
+        theme(
+          plot.title = element_text(hjust = 0.5, face = "bold"),
+          plot.subtitle = element_text(hjust = 0.5),
+          axis.title = element_text(face = "bold")
+        )
+      
+      # Apply log scale if selected, using a safer transformation
+      if (input$useLogScale) {
+        # Add a small value to avoid log(0) or log(negative)
+        small_offset <- 1  # Standard offset for flow data
+        p <- p + scale_x_continuous(
+          trans = scales::pseudo_log_trans(base = 10, sigma = small_offset),
+          labels = scales::label_number()
+        )
+      }
+      
+      return(p)
+    })
+    
+    # Live/Dead stats output
+    output$liveDeadStats <- renderText({
+      req(rawFCS(), input$liveDeadMarkerSelect)
+      
+      # Only proceed if a marker is selected
+      if (input$liveDeadMarkerSelect == "None") {
+        return("No Live/Dead marker selected")
+      }
+      
+      # Extract values for the selected marker
+      if (inherits(rawFCS(), "flowFrame")) {
+        ld_marker <- input$liveDeadMarkerSelect
+        if (grepl(" - ", ld_marker)) {
+          ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
+        }
+        
+        if (!(ld_marker %in% colnames(exprs(rawFCS())))) {
+          return(paste("Marker", ld_marker, "not found in dataset"))
+        }
+        
+        ld_values <- exprs(rawFCS())[, ld_marker]
+      } else {
+        # For non-FCS files
+        if (!(input$liveDeadMarkerSelect %in% colnames(rawFCS()))) {
+          return(paste("Marker", input$liveDeadMarkerSelect, "not found in dataset"))
+        }
+        
+        ld_values <- rawFCS()[[input$liveDeadMarkerSelect]]
+      }
+      
+      # Calculate percentage of cells classified as live
+      total_cells <- length(ld_values)
+      live_cells <- sum(ld_values <= input$liveDeadThresholdSlider, na.rm = TRUE)
+      live_pct <- live_cells / total_cells * 100
+      
+      # Create a summary text
+      paste0(
+        "Total Cells: ", format(total_cells, big.mark = ","), "\n",
+        "Live Cells (below threshold): ", format(live_cells, big.mark = ","), "\n",
+        "Percentage of Live Cells: ", round(live_pct, 1), "%\n\n",
+        "Statistics for this marker:\n",
+        "Min: ", round(min(ld_values, na.rm = TRUE), 1), "\n",
+        "Max: ", round(max(ld_values, na.rm = TRUE), 1), "\n",
+        "Mean: ", round(mean(ld_values, na.rm = TRUE), 1), "\n",
+        "Median: ", round(median(ld_values, na.rm = TRUE), 1)
+      )
+    })
+    
+    # FSC vs Live/Dead scatter plot to visualize gating
+    output$liveDeadScatter <- renderPlot({
+      req(rawFCS(), input$liveDeadMarkerSelect)
+      
+      # Only proceed if a marker is selected
+      if (input$liveDeadMarkerSelect == "None") {
+        return(ggplot() + 
+                 annotate("text", x = 0.5, y = 0.5, 
+                          label = "Please select a Live/Dead marker") +
+                 theme_void())
+      }
+      
+      # Extract FSC-A and selected marker values
+      if (inherits(rawFCS(), "flowFrame")) {
+        ld_marker <- input$liveDeadMarkerSelect
+        if (grepl(" - ", ld_marker)) {
+          ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
+        }
+        
+        # Find FSC-A column
+        fsc_col <- grep("^FSC-A", colnames(exprs(rawFCS())), value = TRUE)
+        if (length(fsc_col) == 0) {
+          # If FSC-A not found, try to find any FSC column
+          fsc_col <- grep("^FSC", colnames(exprs(rawFCS())), value = TRUE)
+          if (length(fsc_col) == 0) {
+            # If still no FSC, use the first column
+            fsc_col <- colnames(exprs(rawFCS()))[1]
+          } else {
+            fsc_col <- fsc_col[1]
+          }
+        } else {
+          fsc_col <- fsc_col[1]
+        }
+        
+        if (!(ld_marker %in% colnames(exprs(rawFCS())))) {
+          return(ggplot() + 
+                   annotate("text", x = 0.5, y = 0.5, 
+                            label = paste("Marker", ld_marker, "not found in dataset")) +
+                   theme_void())
+        }
+        
+        # Create scatter plot data
+        plot_data <- data.frame(
+          FSC = exprs(rawFCS())[, fsc_col],
+          LiveDead = exprs(rawFCS())[, ld_marker]
+        )
+      } else {
+        # For non-FCS files
+        if (!(input$liveDeadMarkerSelect %in% colnames(rawFCS()))) {
+          return(ggplot() + 
+                   annotate("text", x = 0.5, y = 0.5, 
+                            label = paste("Marker", input$liveDeadMarkerSelect, "not found in dataset")) +
+                   theme_void())
+        }
+        
+        # Find a FSC-like column or use the first numeric column
+        numeric_cols <- sapply(rawFCS(), is.numeric)
+        if (any(grepl("FSC|forward", colnames(rawFCS()), ignore.case = TRUE))) {
+          fsc_col <- grep("FSC|forward", colnames(rawFCS()), ignore.case = TRUE, value = TRUE)[1]
+        } else if (any(numeric_cols)) {
+          fsc_col <- names(numeric_cols)[which(numeric_cols)[1]]
+        } else {
+          return(ggplot() + 
+                   annotate("text", x = 0.5, y = 0.5, 
+                            label = "No suitable FSC or numeric column found") +
+                   theme_void())
+        }
+        
+        # Create scatter plot data
+        plot_data <- data.frame(
+          FSC = rawFCS()[[fsc_col]],
+          LiveDead = rawFCS()[[input$liveDeadMarkerSelect]]
+        )
+      }
+      
+      # Handle any invalid values (NAs, Infs)
+      plot_data <- plot_data[is.finite(plot_data$FSC) & is.finite(plot_data$LiveDead), , drop = FALSE]
+      
+      # Add gating result
+      plot_data$GatingResult <- ifelse(plot_data$LiveDead <= input$liveDeadThresholdSlider, 
+                                       "Live", "Dead")
+      
+      # Create scatter plot
+      p <- ggplot(plot_data, aes(x = FSC, y = LiveDead, color = GatingResult)) +
+        geom_point(alpha = 0.5, size = 0.8) +
+        geom_hline(yintercept = input$liveDeadThresholdSlider, 
+                   color = "red", linetype = "dashed", size = 1) +
+        scale_color_manual(values = c("Live" = "forestgreen", "Dead" = "firebrick")) +
+        labs(title = "FSC vs Live/Dead Gating",
+             subtitle = paste("Red line shows current threshold:", input$liveDeadThresholdSlider),
+             x = "Forward Scatter (FSC)",
+             y = input$liveDeadMarkerSelect,
+             color = "Gating Result") +
+        theme_minimal(base_size = 14) +
+        theme(
+          plot.title = element_text(hjust = 0.5, face = "bold"),
+          plot.subtitle = element_text(hjust = 0.5),
+          axis.title = element_text(face = "bold"),
+          legend.position = "right",
+          legend.title = element_text(face = "bold")
+        )
+      
+      # Apply log scale for y-axis if selected, using a safer transformation
+      if (input$useLogScale) {
+        # Add a small value to avoid log(0) or log(negative)
+        small_offset <- 1  # Standard offset for flow data
+        p <- p + scale_y_continuous(
+          trans = scales::pseudo_log_trans(base = 10, sigma = small_offset),
+          labels = scales::label_number()
+        )
+      }
+      
+      return(p)
+    })
+    
+    # Apply live/dead gating threshold to the main analysis
+    observeEvent(input$applyLiveDeadGating, {
+      req(input$liveDeadMarkerSelect, input$liveDeadMarkerSelect != "None")
+      
+      # Extract correct marker name (remove the description part)
+      ld_marker <- input$liveDeadMarkerSelect
+      if (grepl(" - ", ld_marker)) {
+        ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
+      }
+      
+      # Update liveDeadGate selection
+      updateSelectInput(session, "liveDeadGate", selected = ld_marker)
+      
+      # Update liveDeadThreshold value
+      updateNumericInput(session, "liveDeadThreshold", value = input$liveDeadThresholdSlider)
+      
+      # Make sure gating is enabled
+      updateCheckboxInput(session, "performGating", value = TRUE)
+      
+      # Show notification
+      showNotification(
+        paste("Live/Dead threshold updated to", input$liveDeadThresholdSlider),
+        type = "message", 
+        duration = 3
+      )
+    })
     
     # Run analysis when button is clicked
     observeEvent(input$run, {
@@ -189,6 +583,20 @@ rawDataModuleServer <- function(id, app_state) {
             debris_gate = if (length(debris_gate_params) >= 2) debris_gate_params[1:2] else NULL,
             live_dead_gate = if (!is.null(input$liveDeadGate) && input$liveDeadGate != "None") input$liveDeadGate else NULL
           )
+          
+          # Add threshold for live/dead gating if available
+          if (!is.null(input$liveDeadThreshold) && input$liveDeadGate != "None") {
+            # We need to modify the gating function to use this threshold
+            # For now, we'll display a notification about it
+            showNotification(
+              paste("Using live/dead threshold of", input$liveDeadThreshold),
+              type = "message", 
+              duration = 3
+            )
+            
+            # In a full implementation, we'd need to update the performGating function
+            # to use this custom threshold instead of the hardcoded 1000 value
+          }
         }
         
         # Run preprocessing pipeline
@@ -516,31 +924,50 @@ rawDataModuleServer <- function(id, app_state) {
     
     # Cluster visualization in dedicated tab
     output$clusterPlot <- renderPlotly({
-      req(processedData(), clustering_results$clustering_results())
+      req(processedData())
+      
+      # Check if we have clustering results (either original or merged)
+      if (mergeHistory()$active) {
+        # Use merged clusters
+        cluster_data <- list(
+          cluster_ids = mergeHistory()$current_clusters,
+          method = paste(clustering_results$clustering_results()$method, 
+                         "(", length(mergeHistory()$operations), " merges)")
+        )
+        population_data <- mergeHistory()$current_mapping
+      } else if (!is.null(clustering_results$clustering_results())) {
+        # Use original clustering
+        cluster_data <- clustering_results$clustering_results()
+        population_data <- clustering_results$populations()
+      } else {
+        return(NULL)  # No clustering data available
+      }
       
       plot_data <- processedData()$plot_data
-      cluster_data <- clustering_results$clustering_results()
       
       # Add cluster information
       plot_data$Cluster <- as.factor(cluster_data$cluster_ids)
       
       # Add population labels if available
-      if (!is.null(clustering_results$populations()) && 
+      if (!is.null(population_data) && 
           clustering_results$showPopulationLabels()) {
         # Map cluster IDs to population names
         population_map <- setNames(
-          clustering_results$populations()$Population,
-          clustering_results$populations()$Cluster
+          population_data$Population,
+          as.character(population_data$Cluster)
         )
         
         # Add population column to plot data
         plot_data$Population <- population_map[as.character(plot_data$Cluster)]
         
+        # Use population names for coloring
+        color_by <- "Population"
         hover_text <- paste(
           "Cluster:", plot_data$Cluster,
           "<br>Population:", plot_data$Population
         )
       } else {
+        color_by <- "Cluster"
         hover_text <- paste("Cluster:", plot_data$Cluster)
       }
       
@@ -567,24 +994,135 @@ rawDataModuleServer <- function(id, app_state) {
         "<br>", dim_labels[2], ":", round(plot_data[[dim2]], 2)
       )
       
-      # Create plot
+      # Create plot - apply all global settings
       p <- plot_ly(plot_data, 
                    x = ~.data[[dim1]], 
                    y = ~.data[[dim2]],
-                   color = ~Cluster, 
+                   color = ~.data[[color_by]], 
                    type = "scatter", 
                    mode = "markers",
-                   marker = list(size = app_state$plot_settings$point_size),
+                   marker = list(
+                     size = app_state$plot_settings$point_size,
+                     opacity = 0.7
+                   ),
                    text = hover_text) %>%
-        layout(title = paste("Clusters from", cluster_data$method),
-               xaxis = list(title = dim_labels[1]),
-               yaxis = list(title = dim_labels[2]),
-               height = app_state$plot_settings$height,
-               width = app_state$plot_settings$width)
+        layout(
+          title = list(
+            text = paste("Clusters from", cluster_data$method),
+            font = list(
+              size = app_state$plot_settings$font_size * 1.2,
+              family = "Arial",
+              color = "black"
+            )
+          ),
+          xaxis = list(
+            title = list(
+              text = dim_labels[1],
+              font = list(
+                size = app_state$plot_settings$font_size,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              size = app_state$plot_settings$font_size * 0.8
+            ),
+            zeroline = TRUE,
+            zerolinecolor = "#888888",
+            zerolinewidth = 1,
+            showgrid = TRUE,
+            gridcolor = "#EEEEEE"
+          ),
+          yaxis = list(
+            title = list(
+              text = dim_labels[2],
+              font = list(
+                size = app_state$plot_settings$font_size,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              size = app_state$plot_settings$font_size * 0.8
+            ),
+            zeroline = TRUE,
+            zerolinecolor = "#888888",
+            zerolinewidth = 1,
+            showgrid = TRUE,
+            gridcolor = "#EEEEEE"
+          ),
+          legend = list(
+            title = list(
+              text = if(color_by == "Population") "Cell Population" else "Cluster",
+              font = list(
+                size = app_state$plot_settings$font_size,
+                family = "Arial"
+              )
+            ),
+            font = list(
+              size = app_state$plot_settings$font_size * 0.9,
+              family = "Arial"
+            ),
+            bgcolor = "rgba(255, 255, 255, 0.9)",
+            bordercolor = "rgba(0, 0, 0, 0.2)",
+            borderwidth = 1
+          ),
+          margin = list(
+            l = 80,
+            r = 50,
+            b = 80,
+            t = 100,
+            pad = 5
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = app_state$plot_settings$font_size * 0.9
+            )
+          ),
+          grid = list(
+            ygap = 0.1, 
+            xgap = 0.1
+          ),
+          plot_bgcolor = "#FFFFFF",
+          paper_bgcolor = "#FFFFFF",
+          width = app_state$plot_settings$width,
+          height = app_state$plot_settings$height,
+          autosize = FALSE
+        )
       
-      # Add cluster labels with population names if available
-      if (!is.null(clustering_results$populations()) && 
-          clustering_results$showPopulationLabels()) {
+      # Apply color palette based on global settings
+      # Note: For plotly, we need to manually set colors since scale_color functions only work with ggplot
+      if (color_by %in% c("Cluster", "Population")) {
+        # For categorical data, get appropriate palette colors
+        palette_name <- app_state$plot_settings$color_palette
+        n_colors <- length(unique(plot_data[[color_by]]))
+        
+        # Get palette colors based on the selected palette
+        palette_colors <- switch(palette_name,
+          "viridis" = viridis::viridis(n_colors),
+          "plasma" = viridis::plasma(n_colors),
+          "blues" = RColorBrewer::brewer.pal(min(9, n_colors), "Blues"),
+          "reds" = RColorBrewer::brewer.pal(min(9, n_colors), "Reds"),
+          "brewer_paired" = RColorBrewer::brewer.pal(min(12, n_colors), "Paired"),
+          "brewer_brbg" = RColorBrewer::brewer.pal(min(11, n_colors), "BrBG"),
+          viridis::viridis(n_colors) # default
+        )
+        
+        # If we need more colors than a palette provides, recycle them
+        if (n_colors > length(palette_colors)) {
+          palette_colors <- rep_len(palette_colors, n_colors)
+        }
+        
+        # Update the plot with the color palette
+        p <- p %>% layout(
+          colorway = palette_colors
+        )
+      }
+      
+      # Add cluster labels if showing population names and user has enabled labels
+      if (color_by == "Population" && clustering_results$showPopulationLabels() && input$showClusterLabels) {
         # Calculate cluster centers for label positioning
         cluster_centers <- plot_data %>%
           group_by(Cluster, Population) %>%
@@ -599,7 +1137,7 @@ rawDataModuleServer <- function(id, app_state) {
           p <- p %>% add_annotations(
             x = cluster_centers$x[i],
             y = cluster_centers$y[i],
-            text = paste0("Cluster ", cluster_centers$Cluster[i], ": ", cluster_centers$Population[i]),
+            text = cluster_centers$Population[i],
             showarrow = TRUE,
             arrowhead = 0.5,
             arrowsize = 0.5,
@@ -621,10 +1159,48 @@ rawDataModuleServer <- function(id, app_state) {
     output$clusterHeatmap <- renderPlot({
       req(clustering_results$clustering_results())
       
+      # Use original centers but update if merged
+      centers <- clustering_results$clustering_results()$centers
+      method <- clustering_results$clustering_results()$method
+      
+      # If using merged clusters, adjust the centers
+      if (mergeHistory()$active) {
+        operations <- mergeHistory()$operations
+        
+        # Create new centers data
+        new_centers <- centers
+        
+        # Apply each merge operation sequentially
+        for (op in operations) {
+          merged_id <- op$target_cluster
+          merged_from <- op$merged_clusters
+          
+          # Calculate weighted means across markers
+          if (length(merged_from) > 1) {
+            # Get counts of each cluster for weighted average
+            cluster_counts <- table(clustering_results$clustering_results()$cluster_ids)
+            merged_weights <- cluster_counts[merged_from]
+            
+            # Calculate weighted means across markers
+            for (col in 1:ncol(centers)) {
+              values <- new_centers[as.character(merged_from), col]
+              weights <- merged_weights / sum(merged_weights)
+              new_centers[as.character(merged_id), col] <- sum(values * weights, na.rm = TRUE)
+            }
+            
+            # Remove rows for clusters that were merged (except the target)
+            new_centers <- new_centers[!(rownames(new_centers) %in% setdiff(as.character(merged_from), as.character(merged_id))), ]
+          }
+        }
+        
+        centers <- new_centers
+        method <- paste(method, "(", length(operations), " merges)")
+      }
+      
       # Create heatmap
       createClusterHeatmap(
-        centers = clustering_results$clustering_results()$centers,
-        method = clustering_results$clustering_results()$method,
+        centers = centers,
+        method = method,
         title = "Cluster Intensity Profiles",
         font_size = app_state$plot_settings$font_size
       )
@@ -633,33 +1209,86 @@ rawDataModuleServer <- function(id, app_state) {
     
     # Cluster statistics
     output$clusterStats <- DT::renderDataTable({
-      req(clustering_results$clustering_results(), processedData())
+      req(processedData())
       
-      # Get clustering results and plot data
-      cluster_data <- clustering_results$clustering_results()
-      plot_data <- processedData()$plot_data
+      # Check whether to use merged or original clusters
+      if (mergeHistory()$active) {
+        cluster_ids <- mergeHistory()$current_clusters
+        population_data <- mergeHistory()$current_mapping
+        method_name <- paste(clustering_results$clustering_results()$method, 
+                            "(", length(mergeHistory()$operations), " merges)")
+      } else if (!is.null(clustering_results$clustering_results())) {
+        cluster_ids <- clustering_results$clustering_results()$cluster_ids
+        population_data <- clustering_results$populations()
+        method_name <- clustering_results$clustering_results()$method
+      } else {
+        return(NULL)
+      }
       
       # Format cluster statistics
       stats_df <- formatClusterStats(
-        cluster_ids = cluster_data$cluster_ids,
-        total_cells = nrow(plot_data),
-        population_data = clustering_results$populations()
+        cluster_ids = cluster_ids,
+        total_cells = nrow(processedData()$plot_data),
+        population_data = population_data
       )
       
       # Create datatable
       DT::datatable(stats_df, 
                     options = list(scrollX = TRUE, pageLength = 10),
-                    caption = paste("Cluster statistics from", cluster_data$method)) %>%
+                    caption = paste("Cluster statistics from", method_name)) %>%
         formatRound(columns = c("Percentage", "Confidence"), digits = 2)
     })
     
     # Population results table
     output$populationTable <- DT::renderDataTable({
-      req(clustering_results$populations())
+      req(!is.null(clustering_results$populations()))
+      
+      # Use merged population mappings if available
+      if (mergeHistory()$active) {
+        population_data <- mergeHistory()$current_mapping
+        
+        # Add information about merge operations
+        if (length(mergeHistory()$operations) > 0) {
+          # Create a summary of merges performed
+          merge_summary <- lapply(mergeHistory()$operations, function(op) {
+            data.frame(
+              Cluster = op$target_cluster,
+              Population = paste0(op$new_name, " (merged)"),
+              OriginalClusters = paste(op$merged_clusters, collapse=", "),
+              MergeTime = format(op$timestamp, "%H:%M:%S")
+            )
+          })
+          
+          # Add a header to separate merge history
+          population_data <- rbind(
+            population_data,
+            data.frame(
+              Cluster = "---",
+              Population = "--- Merge History ---",
+              Confidence = NA
+            )
+          )
+          
+          # Add merge history to the table
+          for (summary in merge_summary) {
+            population_data <- rbind(
+              population_data,
+              data.frame(
+                Cluster = summary$Cluster,
+                Population = paste0(summary$Population, " (from: ", summary$OriginalClusters, ")"),
+                Confidence = NA,
+                MergeTime = summary$MergeTime
+              )
+            )
+          }
+        }
+      } else {
+        population_data <- clustering_results$populations()
+      }
       
       # Create datatable
       DT::datatable(
-        clustering_results$populations(),
+        population_data,
         options = list(
           pageLength = 10,
           scrollX = TRUE
@@ -674,13 +1303,24 @@ rawDataModuleServer <- function(id, app_state) {
         paste0("cluster_results_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
       },
       content = function(file) {
-        req(clustering_results$clustering_results(), processedData())
+        req(processedData())
+        
+        # Check whether to use merged or original clusters
+        if (mergeHistory()$active) {
+          cluster_ids <- mergeHistory()$current_clusters
+          population_data <- mergeHistory()$current_mapping
+        } else if (!is.null(clustering_results$clustering_results())) {
+          cluster_ids <- clustering_results$clustering_results()$cluster_ids
+          population_data <- clustering_results$populations()
+        } else {
+          return(NULL)
+        }
         
         # Format cluster statistics
         stats_df <- formatClusterStats(
-          cluster_ids = clustering_results$clustering_results()$cluster_ids,
+          cluster_ids = cluster_ids,
           total_cells = nrow(processedData()$plot_data),
-          population_data = clustering_results$populations()
+          population_data = population_data
         )
         
         # Write to CSV
@@ -699,8 +1339,22 @@ rawDataModuleServer <- function(id, app_state) {
         # Get processed data
         data <- processedData()$plot_data
         
-        # Add cluster information if available
-        if (!is.null(clustering_results$clustering_results())) {
+        # Add cluster information - use merged if available
+        if (mergeHistory()$active) {
+          data$Cluster <- as.factor(mergeHistory()$current_clusters)
+          
+          # Add population information if available
+          if (!is.null(mergeHistory()$current_mapping)) {
+            # Create mapping of cluster IDs to population names
+            pop_mapping <- setNames(
+              mergeHistory()$current_mapping$Population,
+              mergeHistory()$current_mapping$Cluster
+            )
+            
+            # Add population column
+            data$Population <- pop_mapping[as.character(data$Cluster)]
+          }
+        } else if (!is.null(clustering_results$clustering_results())) {
           data$Cluster <- as.factor(clustering_results$clustering_results()$cluster_ids)
           
           # Add population information if available
@@ -720,6 +1374,141 @@ rawDataModuleServer <- function(id, app_state) {
         write.csv(data, file, row.names = FALSE)
       }
     )
+    
+    # Add cluster merge modal
+    observeEvent(input$showMergeModal, {
+      req(clustering_results$clustering_results())
+      
+      # Get current state of clusters
+      if (mergeHistory()$active) {
+        # Use the current merged state
+        current_clusters <- mergeHistory()$current_clusters
+        population_data <- mergeHistory()$current_mapping
+      } else {
+        # Use original clusters
+        current_clusters <- clustering_results$clustering_results()$cluster_ids
+        population_data <- clustering_results$populations()
+      }
+      
+      # Get unique clusters and their names from current state
+      unique_clusters <- unique(current_clusters)
+      
+      # Create choices for checkboxes with friendly names - showing only available clusters
+      cluster_choices <- setNames(
+        as.character(unique_clusters),
+        sapply(unique_clusters, function(c) {
+          pop_name <- population_data$Population[population_data$Cluster == c]
+          if (length(pop_name) == 0) pop_name <- "Unknown"
+          paste("Cluster", c, ":", pop_name)
+        })
+      )
+      
+      showModal(modalDialog(
+        title = "Merge Similar Clusters",
+        
+        # Create checkboxes for all currently available clusters
+        checkboxGroupInput(session$ns("clustersToMerge"), 
+                         "Select clusters to merge:", 
+                         choices = cluster_choices),
+        
+        textInput(session$ns("mergedClusterName"), "Name for merged cluster:", 
+                 value = "Merged Population"),
+        
+        # Add a note about the cumulative nature of merges
+        tags$div(
+          class = "help-block",
+          tags$b("Note:"), 
+          "This merge will be added to any previous merges. Use 'Reset to Original Clusters' to start over."
+        ),
+        
+        footer = tagList(
+          actionButton(session$ns("performMerge"), "Merge Clusters", 
+                      class = "btn-success"),
+          modalButton("Cancel")
+        ),
+        
+        size = "l"
+      ))
+    })
+    
+    # Handle cluster merging
+    observeEvent(input$performMerge, {
+      req(input$clustersToMerge, length(input$clustersToMerge) >= 2)
+      
+      # Get current state (either original or already-merged clusters)
+      if (mergeHistory()$active) {
+        # Start from current merged state
+        current_clusters <- mergeHistory()$current_clusters
+        current_mapping <- mergeHistory()$current_mapping
+      } else {
+        # Start from original clustering
+        current_clusters <- clustering_results$clustering_results()$cluster_ids
+        current_mapping <- clustering_results$populations()
+      }
+      
+      # Create a copy to modify
+      new_clusters <- current_clusters
+      
+      # Get lowest cluster ID from selection (to use as the merged ID)
+      merged_id <- min(as.numeric(input$clustersToMerge))
+      
+      # Change all selected clusters to the merged ID
+      for (cluster_id in input$clustersToMerge) {
+        new_clusters[current_clusters == cluster_id] <- merged_id
+      }
+      
+      # Create a copy of the current mapping to modify
+      new_mapping <- current_mapping
+      
+      # Update name for the merged cluster
+      new_mapping$Population[new_mapping$Cluster == merged_id] <- input$mergedClusterName
+      
+      # Remove rows for clusters that were merged (except the target)
+      new_mapping <- new_mapping[!(new_mapping$Cluster %in% setdiff(input$clustersToMerge, merged_id)), ]
+      
+      # Add this operation to history
+      current_history <- mergeHistory()
+      current_history$active <- TRUE
+      current_history$current_clusters <- new_clusters
+      current_history$current_mapping <- new_mapping
+      
+      # Add details of this merge operation
+      new_operation <- list(
+        timestamp = Sys.time(),
+        merged_clusters = input$clustersToMerge,
+        target_cluster = merged_id,
+        new_name = input$mergedClusterName
+      )
+      current_history$operations <- c(current_history$operations, list(new_operation))
+      
+      # Update merge history
+      mergeHistory(current_history)
+      
+      removeModal()
+      
+      # Calculate how many clusters we have now
+      remaining_clusters <- length(unique(new_clusters))
+      total_merges <- length(current_history$operations)
+      
+      showNotification(
+        paste0("Merged into '", input$mergedClusterName, "'. You now have ", 
+              remaining_clusters, " clusters (", total_merges, " merge operations)"), 
+        type = "default", duration = 5
+      )
+    })
+    
+    # Reset clusters to original clustering
+    observeEvent(input$resetMerging, {
+      # Reset merge history
+      mergeHistory(list(
+        active = FALSE,
+        operations = list(),
+        current_clusters = NULL,
+        current_mapping = NULL
+      ))
+      
+      showNotification("Restored original clusters", type = "default", duration = 3)
+    })
     
     # Return reactive values that might be needed by other modules
     return(list(

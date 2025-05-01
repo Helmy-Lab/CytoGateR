@@ -175,6 +175,15 @@ batchAnalysisModuleUI <- function(id) {
                    ),
                    hr(),
                    fluidRow(
+                     column(12, h4("Cluster Management", align = "center")),
+                     column(4, actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
+                                          class = "btn-primary", style = "width: 100%")),
+                     column(4, actionButton(ns("resetMerging"), "Reset to Original Clusters", 
+                                          class = "btn-warning", style = "width: 100%")),
+                     column(4, checkboxInput(ns("showClusterLabels"), "Show Population Labels", value = TRUE))
+                   ),
+                   hr(),
+                   fluidRow(
                      column(12, h4("Cluster Statistics", align = "center")),
                      column(12, shinycssloaders::withSpinner(DT::dataTableOutput(ns("sampleClusterStats"))))
                    ),
@@ -242,6 +251,15 @@ batchAnalysisModuleServer <- function(id, app_state) {
     # Create reactive values to store batch samples and their results
     batchSamples <- reactiveVal(list())
     batchResults <- reactiveVal(list())
+    
+    # Add reactive values to track cluster merging
+    mergeHistory <- reactiveVal(list(
+      active = FALSE,
+      current_clusters = NULL,
+      original_clusters = NULL,
+      current_mapping = NULL,
+      operations = list()
+    ))
     
     # Function to add samples to the batch list
     observeEvent(input$addSample, {
@@ -813,15 +831,21 @@ batchAnalysisModuleServer <- function(id, app_state) {
           )
         }
         
+        # Determine what to use for color mapping - Population or Cluster
+        color_by <- "Cluster"
+        if ("Population" %in% colnames(plot_data)) {
+          color_by <- "Population"
+        }
+        
         # Create a ggplot object first
-        p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = Cluster, text = hover_text)) +
+        p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]], text = hover_text)) +
           geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2) +
           get_color_palette(app_state$plot_settings$color_palette) +
           labs(
-            title = paste(sample$dim_red_method, "Plot Colored by Cluster"),
+            title = paste(sample$dim_red_method, "Plot Colored by", if(color_by == "Population") "Cell Population" else "Cluster"),
             x = paste(sample$dim_red_method, "1"),
             y = paste(sample$dim_red_method, "2"),
-            color = "Cluster"
+            color = if(color_by == "Population") "Cell Population" else "Cluster"
           ) +
           get_standard_theme(app_state$plot_settings$font_size)
         
@@ -887,6 +911,26 @@ batchAnalysisModuleServer <- function(id, app_state) {
       
       plot_data <- sample$plot_data
       
+      # Check if we have merged clusters
+      current_merge_history <- mergeHistory()
+      if (current_merge_history$active) {
+        # Create a temporary data frame with merged clusters
+        plot_data <- plot_data
+        plot_data$Cluster <- as.factor(current_merge_history$current_clusters)
+        
+        # Add population information if available
+        if (!is.null(current_merge_history$current_mapping)) {
+          # Create mapping between cluster ID and population name
+          population_map <- setNames(
+            current_merge_history$current_mapping$Population,
+            current_merge_history$current_mapping$Cluster
+          )
+          
+          # Add population column
+          plot_data$Population <- population_map[as.character(plot_data$Cluster)]
+        }
+      }
+      
       # Create hover text based on available information
       if ("Population" %in% colnames(plot_data)) {
         hover_text <- paste(
@@ -903,15 +947,165 @@ batchAnalysisModuleServer <- function(id, app_state) {
         )
       }
       
-      p <- plot_ly(plot_data, x = ~dim1, y = ~dim2, color = ~Cluster,
-                   text = hover_text, type = "scatter", mode = "markers",
+      # Get color palette based on global settings
+      palette_name <- app_state$plot_settings$color_palette
+      n_colors <- length(unique(plot_data$Cluster))
+      
+      # Get palette colors based on the selected palette
+      palette_colors <- switch(palette_name,
+        "viridis" = viridis::viridis(n_colors),
+        "plasma" = viridis::plasma(n_colors),
+        "blues" = RColorBrewer::brewer.pal(min(9, n_colors), "Blues"),
+        "reds" = RColorBrewer::brewer.pal(min(9, n_colors), "Reds"),
+        "brewer_paired" = RColorBrewer::brewer.pal(min(12, n_colors), "Paired"),
+        "brewer_brbg" = RColorBrewer::brewer.pal(min(11, n_colors), "BrBG"),
+        viridis::viridis(n_colors) # default
+      )
+      
+      # If we need more colors than a palette provides, recycle them
+      if (n_colors > length(palette_colors)) {
+        palette_colors <- rep_len(palette_colors, n_colors)
+      }
+      
+      # Determine what to use for color mapping - Population or Cluster
+      color_by <- "Cluster"
+      if ("Population" %in% colnames(plot_data)) {
+        color_by <- "Population"
+      }
+      
+      p <- plot_ly(plot_data, 
+                   x = ~dim1, 
+                   y = ~dim2, 
+                   color = ~.data[[color_by]],
+                   text = hover_text, 
+                   type = "scatter", 
+                   mode = "markers",
                    marker = list(size = app_state$plot_settings$point_size, opacity = 0.7)) %>%
         layout(
-          title = paste("Cluster Plot -", sample$cluster_results$method),
-          xaxis = list(title = paste(sample$dim_red_method, "1")),
-          yaxis = list(title = paste(sample$dim_red_method, "2")),
-          colorbar = list(title = "Cluster")
+          title = list(
+            text = paste("Cluster Plot -", sample$cluster_results$method),
+            font = list(
+              size = app_state$plot_settings$font_size * 1.2,
+              family = "Arial",
+              color = "black"
+            )
+          ),
+          xaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "1"),
+              font = list(
+                size = app_state$plot_settings$font_size,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              size = app_state$plot_settings$font_size * 0.8
+            ),
+            zeroline = TRUE,
+            zerolinecolor = "#888888",
+            zerolinewidth = 1,
+            showgrid = TRUE,
+            gridcolor = "#EEEEEE"
+          ),
+          yaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "2"),
+              font = list(
+                size = app_state$plot_settings$font_size,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              size = app_state$plot_settings$font_size * 0.8
+            ),
+            zeroline = TRUE,
+            zerolinecolor = "#888888",
+            zerolinewidth = 1,
+            showgrid = TRUE,
+            gridcolor = "#EEEEEE"
+          ),
+          colorway = palette_colors,
+          legend = list(
+            title = list(
+              text = if(color_by == "Population") "Cell Population" else "Cluster",
+              font = list(
+                size = app_state$plot_settings$font_size,
+                family = "Arial"
+              )
+            ),
+            font = list(
+              size = app_state$plot_settings$font_size * 0.9,
+              family = "Arial"
+            ),
+            bgcolor = "rgba(255, 255, 255, 0.9)",
+            bordercolor = "rgba(0, 0, 0, 0.2)",
+            borderwidth = 1
+          ),
+          colorbar = list(
+            title = list(
+              text = if(color_by == "Population") "Cell Population" else "Cluster",
+              font = list(
+                size = app_state$plot_settings$font_size,
+                family = "Arial"
+              )
+            ),
+            tickfont = list(
+              size = app_state$plot_settings$font_size * 0.8
+            )
+          ),
+          margin = list(
+            l = 80,
+            r = 50,
+            b = 80,
+            t = 100,
+            pad = 5
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = app_state$plot_settings$font_size * 0.9
+            )
+          ),
+          plot_bgcolor = "#FFFFFF",
+          paper_bgcolor = "#FFFFFF",
+          width = app_state$plot_settings$width,
+          height = app_state$plot_settings$height,
+          autosize = FALSE
         )
+      
+      # Add population labels if available and requested
+      if ("Population" %in% colnames(plot_data) && input$showClusterLabels) {
+        # Calculate cluster centers for label positioning
+        cluster_centers <- plot_data %>%
+          group_by(Cluster, Population) %>%
+          summarize(
+            x = mean(dim1, na.rm = TRUE),
+            y = mean(dim2, na.rm = TRUE),
+            .groups = 'drop'
+          )
+        
+        # Add annotations to plot
+        for (i in 1:nrow(cluster_centers)) {
+          p <- p %>% add_annotations(
+            x = cluster_centers$x[i],
+            y = cluster_centers$y[i],
+            text = cluster_centers$Population[i],
+            showarrow = TRUE,
+            arrowhead = 0.5,
+            arrowsize = 0.5,
+            arrowwidth = 1,
+            ax = 20,
+            ay = -20,
+            bgcolor = "rgba(255, 255, 255, 0.8)",
+            bordercolor = "rgba(0, 0, 0, 0.5)",
+            borderwidth = 1,
+            font = list(size = app_state$plot_settings$font_size)
+          )
+        }
+      }
       
       return(p)
     })
@@ -929,10 +1123,49 @@ batchAnalysisModuleServer <- function(id, app_state) {
         return(NULL)
       }
       
+      # Use original centers but update if merged
+      centers <- sample$cluster_results$centers
+      method <- sample$cluster_results$method
+      
+      # If using merged clusters, adjust the centers
+      current_merge_history <- mergeHistory()
+      if (current_merge_history$active) {
+        operations <- current_merge_history$operations
+        
+        # Create new centers data
+        new_centers <- centers
+        
+        # Apply each merge operation sequentially
+        for (op in operations) {
+          merged_id <- op$target_cluster
+          merged_from <- op$merged_clusters
+          
+          # Calculate weighted means across markers
+          if (length(merged_from) > 1) {
+            # Get counts of each cluster for weighted average
+            cluster_counts <- table(sample$cluster_results$cluster_ids)
+            merged_weights <- cluster_counts[merged_from]
+            
+            # Calculate weighted means across markers
+            for (col in 1:ncol(centers)) {
+              values <- new_centers[as.character(merged_from), col]
+              weights <- merged_weights / sum(merged_weights)
+              new_centers[as.character(merged_id), col] <- sum(values * weights, na.rm = TRUE)
+            }
+            
+            # Remove rows for clusters that were merged (except the target)
+            new_centers <- new_centers[!(rownames(new_centers) %in% setdiff(as.character(merged_from), as.character(merged_id))), ]
+          }
+        }
+        
+        centers <- new_centers
+        method <- paste(method, "(", length(operations), " merged clusters)")
+      }
+      
       # Create cluster heatmap
       createClusterHeatmap(
-        centers = sample$cluster_results$centers,
-        method = sample$cluster_results$method,
+        centers = centers,
+        method = method,
         title = paste("Marker Expression by Cluster -", sample$name),
         font_size = app_state$plot_settings$font_size
       )
@@ -955,22 +1188,64 @@ batchAnalysisModuleServer <- function(id, app_state) {
       # Calculate cluster statistics
       plot_data <- sample$plot_data
       
+      # Check whether to use merged or original clusters
+      current_merge_history <- mergeHistory()
+      cluster_ids <- sample$cluster_results$cluster_ids
+      population_data <- sample$populations
+      
+      if (current_merge_history$active) {
+        cluster_ids <- current_merge_history$current_clusters
+        population_data <- current_merge_history$current_mapping
+      }
+      
       # Format stats
       stats_df <- formatClusterStats(
-        cluster_ids = sample$cluster_results$cluster_ids,
+        cluster_ids = cluster_ids,
         total_cells = nrow(plot_data),
-        population_data = sample$populations
+        population_data = population_data
       )
       
-      DT::datatable(
-        stats_df,
-        options = list(
-          pageLength = 15,
-          scrollX = TRUE
-        ),
-        rownames = FALSE,
-        caption = paste("Cluster Statistics for", sample$name)
-      ) %>% formatRound(columns = c("Percentage", "Confidence"), digits = 2)
+      # Add merge history if available
+      if (current_merge_history$active && length(current_merge_history$operations) > 0) {
+        # Create a data frame to show merge history
+        merge_history_df <- do.call(rbind, lapply(current_merge_history$operations, function(op) {
+          data.frame(
+            MergeOperation = paste0("Merge ", which(current_merge_history$operations == op)),
+            NewPopulation = op$new_name,
+            TargetCluster = op$target_cluster,
+            OriginalClusters = paste(op$merged_clusters, collapse=", "),
+            Timestamp = format(op$timestamp, "%Y-%m-%d %H:%M:%S")
+          )
+        }))
+        
+        # Return combined data frame with history at the top
+        combined_df <- rbind(
+          cbind(stats_df[1, 1:2], MergeHistory = "Cluster Merge History", stringsAsFactors = FALSE),
+          cbind(merge_history_df, Cells = NA, Percentage = NA, Confidence = NA)[, c(3,2,1,4,5,6,7,8)],
+          stats_df
+        )
+        
+        DT::datatable(
+          combined_df,
+          options = list(
+            pageLength = 15,
+            scrollX = TRUE
+          ),
+          rownames = FALSE,
+          caption = paste("Cluster Statistics for", sample$name, "with Merge History")
+        ) %>% formatRound(columns = c("Percentage", "Confidence"), digits = 2)
+      } else {
+        # Just show regular stats
+        DT::datatable(
+          stats_df,
+          options = list(
+            pageLength = 15,
+            scrollX = TRUE
+          ),
+          rownames = FALSE,
+          caption = paste("Cluster Statistics for", sample$name)
+        ) %>% formatRound(columns = c("Percentage", "Confidence"), digits = 2)
+      }
     })
     
     # Single sample marker expression by cluster
@@ -1037,14 +1312,106 @@ batchAnalysisModuleServer <- function(id, app_state) {
           hover_text <- paste0(hover_text, "<br>Population: ", plot_data$Population)
         }
         
-        p <- plot_ly(plot_data, x = ~dim1, y = ~dim2, color = ~Cluster,
-                     text = hover_text, type = "scatter", mode = "markers",
+        # Get color palette based on global settings
+        palette_name <- app_state$plot_settings$color_palette
+        n_colors <- length(unique(plot_data$Cluster))
+        
+        # Get palette colors based on the selected palette
+        palette_colors <- switch(palette_name,
+          "viridis" = viridis::viridis(n_colors),
+          "plasma" = viridis::plasma(n_colors),
+          "blues" = RColorBrewer::brewer.pal(min(9, n_colors), "Blues"),
+          "reds" = RColorBrewer::brewer.pal(min(9, n_colors), "Reds"),
+          "brewer_paired" = RColorBrewer::brewer.pal(min(12, n_colors), "Paired"),
+          "brewer_brbg" = RColorBrewer::brewer.pal(min(11, n_colors), "BrBG"),
+          viridis::viridis(n_colors) # default
+        )
+        
+        # If we need more colors than a palette provides, recycle them
+        if (n_colors > length(palette_colors)) {
+          palette_colors <- rep_len(palette_colors, n_colors)
+        }
+        
+        # Determine what to use for color mapping - Population or Cluster
+        color_by <- "Cluster"
+        if ("Population" %in% colnames(plot_data)) {
+          color_by <- "Population"
+        }
+        
+        p <- plot_ly(plot_data, 
+                     x = ~dim1, 
+                     y = ~dim2, 
+                     color = ~.data[[color_by]],
+                     text = hover_text, 
+                     type = "scatter", 
+                     mode = "markers",
                      marker = list(size = app_state$plot_settings$point_size, opacity = 0.7)) %>%
           layout(
-            title = paste("Control:", sample$name),
-            xaxis = list(title = paste(sample$dim_red_method, "1")),
-            yaxis = list(title = paste(sample$dim_red_method, "2")),
-            showlegend = FALSE
+            title = list(
+              text = paste("Control:", sample$name),
+              font = list(
+                size = app_state$plot_settings$font_size * 1.2,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            xaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "1"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            yaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "2"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            colorway = palette_colors,
+            showlegend = FALSE,
+            margin = list(
+              l = 80,
+              r = 50,
+              b = 80,
+              t = 100,
+              pad = 5
+            ),
+            hoverlabel = list(
+              bgcolor = "white",
+              font = list(
+                family = "Arial",
+                size = app_state$plot_settings$font_size * 0.9
+              )
+            ),
+            plot_bgcolor = "#FFFFFF",
+            paper_bgcolor = "#FFFFFF",
+            width = app_state$plot_settings$width,
+            height = app_state$plot_settings$height,
+            autosize = FALSE
           )
       } else {
         # If no clustering, create a simple plot
@@ -1057,9 +1424,69 @@ batchAnalysisModuleServer <- function(id, app_state) {
                      text = hover_text, type = "scatter", mode = "markers",
                      marker = list(size = app_state$plot_settings$point_size, opacity = 0.7, color = "#3366CC")) %>%
           layout(
-            title = paste("Control:", sample$name),
-            xaxis = list(title = paste(sample$dim_red_method, "1")),
-            yaxis = list(title = paste(sample$dim_red_method, "2"))
+            title = list(
+              text = paste("Control:", sample$name),
+              font = list(
+                size = app_state$plot_settings$font_size * 1.2,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            xaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "1"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            yaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "2"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            margin = list(
+              l = 80,
+              r = 50,
+              b = 80,
+              t = 100,
+              pad = 5
+            ),
+            hoverlabel = list(
+              bgcolor = "white",
+              font = list(
+                family = "Arial",
+                size = app_state$plot_settings$font_size * 0.9
+              )
+            ),
+            plot_bgcolor = "#FFFFFF",
+            paper_bgcolor = "#FFFFFF",
+            width = app_state$plot_settings$width,
+            height = app_state$plot_settings$height,
+            autosize = FALSE
           )
       }
       
@@ -1090,13 +1517,121 @@ batchAnalysisModuleServer <- function(id, app_state) {
           hover_text <- paste0(hover_text, "<br>Population: ", plot_data$Population)
         }
         
-        p <- plot_ly(plot_data, x = ~dim1, y = ~dim2, color = ~Cluster,
-                     text = hover_text, type = "scatter", mode = "markers",
+        # Get color palette based on global settings
+        palette_name <- app_state$plot_settings$color_palette
+        n_colors <- length(unique(plot_data$Cluster))
+        
+        # Get palette colors based on the selected palette
+        palette_colors <- switch(palette_name,
+          "viridis" = viridis::viridis(n_colors),
+          "plasma" = viridis::plasma(n_colors),
+          "blues" = RColorBrewer::brewer.pal(min(9, n_colors), "Blues"),
+          "reds" = RColorBrewer::brewer.pal(min(9, n_colors), "Reds"),
+          "brewer_paired" = RColorBrewer::brewer.pal(min(12, n_colors), "Paired"),
+          "brewer_brbg" = RColorBrewer::brewer.pal(min(11, n_colors), "BrBG"),
+          viridis::viridis(n_colors) # default
+        )
+        
+        # If we need more colors than a palette provides, recycle them
+        if (n_colors > length(palette_colors)) {
+          palette_colors <- rep_len(palette_colors, n_colors)
+        }
+        
+        # Determine what to use for color mapping - Population or Cluster
+        color_by <- "Cluster"
+        if ("Population" %in% colnames(plot_data)) {
+          color_by <- "Population"
+        }
+        
+        p <- plot_ly(plot_data, 
+                     x = ~dim1, 
+                     y = ~dim2, 
+                     color = ~.data[[color_by]],
+                     text = hover_text, 
+                     type = "scatter", 
+                     mode = "markers",
                      marker = list(size = app_state$plot_settings$point_size, opacity = 0.7)) %>%
           layout(
-            title = paste("Treated:", sample$name),
-            xaxis = list(title = paste(sample$dim_red_method, "1")),
-            yaxis = list(title = paste(sample$dim_red_method, "2"))
+            title = list(
+              text = paste("Treated:", sample$name),
+              font = list(
+                size = app_state$plot_settings$font_size * 1.2,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            xaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "1"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            yaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "2"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            colorway = palette_colors,
+            legend = list(
+              title = list(
+                text = if(color_by == "Population") "Cell Population" else "Cluster",
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial"
+                )
+              ),
+              font = list(
+                size = app_state$plot_settings$font_size * 0.9,
+                family = "Arial"
+              ),
+              bgcolor = "rgba(255, 255, 255, 0.9)",
+              bordercolor = "rgba(0, 0, 0, 0.2)",
+              borderwidth = 1
+            ),
+            margin = list(
+              l = 80,
+              r = 50,
+              b = 80,
+              t = 100,
+              pad = 5
+            ),
+            hoverlabel = list(
+              bgcolor = "white",
+              font = list(
+                family = "Arial",
+                size = app_state$plot_settings$font_size * 0.9
+              )
+            ),
+            plot_bgcolor = "#FFFFFF",
+            paper_bgcolor = "#FFFFFF",
+            width = app_state$plot_settings$width,
+            height = app_state$plot_settings$height,
+            autosize = FALSE
           )
       } else {
         # If no clustering, create a simple plot
@@ -1109,9 +1644,69 @@ batchAnalysisModuleServer <- function(id, app_state) {
                      text = hover_text, type = "scatter", mode = "markers",
                      marker = list(size = app_state$plot_settings$point_size, opacity = 0.7, color = "#FF6633")) %>%
           layout(
-            title = paste("Treated:", sample$name),
-            xaxis = list(title = paste(sample$dim_red_method, "1")),
-            yaxis = list(title = paste(sample$dim_red_method, "2"))
+            title = list(
+              text = paste("Treated:", sample$name),
+              font = list(
+                size = app_state$plot_settings$font_size * 1.2,
+                family = "Arial",
+                color = "black"
+              )
+            ),
+            xaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "1"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            yaxis = list(
+              title = list(
+                text = paste(sample$dim_red_method, "2"),
+                font = list(
+                  size = app_state$plot_settings$font_size,
+                  family = "Arial",
+                  color = "black"
+                )
+              ),
+              tickfont = list(
+                size = app_state$plot_settings$font_size * 0.8
+              ),
+              zeroline = TRUE,
+              zerolinecolor = "#888888",
+              zerolinewidth = 1,
+              showgrid = TRUE,
+              gridcolor = "#EEEEEE"
+            ),
+            margin = list(
+              l = 80,
+              r = 50,
+              b = 80,
+              t = 100,
+              pad = 5
+            ),
+            hoverlabel = list(
+              bgcolor = "white",
+              font = list(
+                family = "Arial",
+                size = app_state$plot_settings$font_size * 0.9
+              )
+            ),
+            plot_bgcolor = "#FFFFFF",
+            paper_bgcolor = "#FFFFFF",
+            width = app_state$plot_settings$width,
+            height = app_state$plot_settings$height,
+            autosize = FALSE
           )
       }
       
@@ -1180,6 +1775,169 @@ batchAnalysisModuleServer <- function(id, app_state) {
       )
     }, width = function() app_state$plot_settings$width,
     height = function() app_state$plot_settings$height)
+    
+    # Cluster merge modal
+    observeEvent(input$showMergeModal, {
+      req(input$viewSample)
+      results <- batchResults()
+      if (is.null(results) || is.null(results[[input$viewSample]])) {
+        return(NULL)
+      }
+      
+      sample <- results[[input$viewSample]]
+      
+      # Check if we have clusters
+      if (is.null(sample$cluster_results)) {
+        showNotification("No clustering results available for this sample", type = "error")
+        return(NULL)
+      }
+      
+      # Initialize merge history for this sample if not already done
+      current_merge_history <- mergeHistory()
+      if (!current_merge_history$active) {
+        # Store original cluster IDs
+        original_clusters <- sample$cluster_results$cluster_ids
+        
+        # Set up initial merge history
+        mergeHistory(list(
+          active = TRUE,
+          current_clusters = original_clusters,
+          original_clusters = original_clusters,
+          current_mapping = if (!is.null(sample$populations)) sample$populations else data.frame(Cluster = unique(original_clusters), Population = paste0("Cluster ", unique(original_clusters))),
+          operations = list()
+        ))
+      }
+      
+      # Get current clusters and populations
+      current_merge_history <- mergeHistory()
+      current_clusters <- unique(current_merge_history$current_clusters)
+      
+      # Create cluster choices
+      if (!is.null(sample$populations)) {
+        # Use population names if available
+        populations <- current_merge_history$current_mapping
+        cluster_choices <- setNames(
+          as.character(populations$Cluster),
+          paste0(populations$Cluster, ": ", populations$Population)
+        )
+      } else {
+        # Just use cluster IDs
+        cluster_choices <- setNames(
+          as.character(current_clusters),
+          paste0("Cluster ", current_clusters)
+        )
+      }
+      
+      # Show modal
+      showModal(modalDialog(
+        title = "Merge Similar Clusters",
+        
+        fluidRow(
+          column(12,
+            checkboxGroupInput(session$ns("clustersToMerge"),
+                              "Select clusters to merge:",
+                              choices = cluster_choices,
+                              selected = NULL),
+            textInput(session$ns("mergedClusterName"), "Name for merged cluster:",
+                     value = "Merged Cell Population")
+          )
+        ),
+        
+        tags$div(class = "alert alert-info",
+                "This merge will be added to any previous merges. Use 'Reset to Original Clusters' to start over."),
+        
+        footer = tagList(
+          actionButton(session$ns("performMerge"), "Merge Clusters", 
+                       class = "btn-primary"),
+          modalButton("Cancel")
+        ),
+        
+        size = "m",
+        easyClose = TRUE
+      ))
+    })
+    
+    # Handle cluster merging
+    observeEvent(input$performMerge, {
+      req(input$clustersToMerge, length(input$clustersToMerge) >= 2)
+      
+      # Get current state (either original or already-merged clusters)
+      current_merge_history <- mergeHistory()
+      
+      current_clusters <- current_merge_history$current_clusters
+      new_clusters <- current_clusters
+      
+      # Get current mapping
+      new_mapping <- current_merge_history$current_mapping
+      
+      # Get lowest cluster ID from selection (to use as the merged ID)
+      merged_id <- min(as.numeric(input$clustersToMerge))
+      
+      # Change all selected clusters to the merged ID
+      for (cluster_id in input$clustersToMerge) {
+        new_clusters[current_clusters == cluster_id] <- merged_id
+      }
+      
+      # Update name for the merged cluster
+      new_mapping$Population[new_mapping$Cluster == merged_id] <- input$mergedClusterName
+      
+      # Remove rows for clusters that were merged (except the target)
+      new_mapping <- new_mapping[!(new_mapping$Cluster %in% setdiff(input$clustersToMerge, merged_id)), ]
+      
+      # Add to merge history
+      operations <- current_merge_history$operations
+      operations[[length(operations) + 1]] <- list(
+        timestamp = Sys.time(),
+        merged_clusters = input$clustersToMerge,
+        target_cluster = merged_id,
+        new_name = input$mergedClusterName
+      )
+      
+      # Update merge history
+      mergeHistory(list(
+        active = TRUE,
+        current_clusters = new_clusters,
+        original_clusters = current_merge_history$original_clusters,
+        current_mapping = new_mapping,
+        operations = operations
+      ))
+      
+      # Close modal and show success notification
+      removeModal()
+      
+      # Calculate remaining clusters and show notification
+      remaining_clusters <- length(unique(new_clusters))
+      total_merges <- length(operations)
+      
+      showNotification(
+        paste0("Merged into '", input$mergedClusterName, "'. You now have ",
+               remaining_clusters, " clusters (", total_merges, " merge operations)"),
+        type = "message"
+      )
+      
+      # Force re-render of visualizations
+      session$sendCustomMessage(type = 'refreshPlots', message = list())
+    })
+    
+    # Reset merging
+    observeEvent(input$resetMerging, {
+      req(input$viewSample)
+      
+      # Reset merge history
+      mergeHistory(list(
+        active = FALSE,
+        current_clusters = NULL,
+        original_clusters = NULL,
+        current_mapping = NULL,
+        operations = list()
+      ))
+      
+      # Show notification
+      showNotification("Reset to original clusters", type = "message")
+      
+      # Force re-render of visualizations
+      session$sendCustomMessage(type = 'refreshPlots', message = list())
+    })
     
     # Return reactive values that might be needed by other modules
     return(list(

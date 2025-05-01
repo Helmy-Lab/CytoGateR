@@ -52,6 +52,8 @@ get_color_palette <- function(palette_name) {
          "plasma" = scale_color_viridis_d(option = "plasma"),
          "blues" = scale_color_brewer(palette = "Blues"),
          "reds" = scale_color_brewer(palette = "Reds"),
+         "brewer_paired" = scale_color_brewer(palette = "Paired"),
+         "brewer_brbg" = scale_color_brewer(palette = "BrBG"),
          scale_color_viridis_d()  # Default fallback
   )
 }
@@ -63,6 +65,8 @@ get_fill_palette <- function(palette_name) {
          "plasma" = scale_fill_viridis_c(option = "plasma"),
          "blues" = scale_fill_distiller(palette = "Blues", direction = 1),
          "reds" = scale_fill_distiller(palette = "Reds", direction = 1),
+         "brewer_paired" = scale_fill_brewer(palette = "Paired"),
+         "brewer_brbg" = scale_fill_brewer(palette = "BrBG"),
          scale_fill_viridis_c()  # Default fallback
   )
 }

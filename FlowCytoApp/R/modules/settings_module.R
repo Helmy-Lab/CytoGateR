@@ -27,7 +27,9 @@ settingsModuleUI <- function(id) {
                           choices = c("Viridis" = "viridis", 
                                       "Plasma" = "plasma", 
                                       "Blues" = "blues",
-                                      "Reds" = "reds"),
+                                      "Reds" = "reds",
+                                      "Paired (Categorical)" = "brewer_paired",
+                                      "Brown-Blue-Green" = "brewer_brbg"),
                           selected = "viridis"),
              
              actionButton(ns("apply_plot_settings"), "Apply Settings to All Plots", 
@@ -100,6 +102,10 @@ settingsModuleServer <- function(id, app_state) {
         p <- p + scale_color_brewer(palette = "Blues")
       } else if (palette == "reds") {
         p <- p + scale_color_brewer(palette = "Reds")
+      } else if (palette == "brewer_paired") {
+        p <- p + scale_color_brewer(palette = "Paired")
+      } else if (palette == "brewer_brbg") {
+        p <- p + scale_color_brewer(palette = "BrBG")
       }
       
       return(p)

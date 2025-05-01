@@ -33,6 +33,10 @@ createDimReductionPlot <- function(plot_data, dim1, dim2, colorBy = NULL,
       p <- p + scale_color_brewer(palette = "Blues")
     } else if (color_palette == "reds") {
       p <- p + scale_color_brewer(palette = "Reds")
+    } else if (color_palette == "brewer_paired") {
+      p <- p + scale_color_brewer(palette = "Paired")
+    } else if (color_palette == "brewer_brbg") {
+      p <- p + scale_color_brewer(palette = "BrBG")
     }
   }
   else {
@@ -291,6 +295,10 @@ createMarkerExpressionPlot <- function(plot_data, marker, color_palette = "virid
     p <- p + scale_fill_brewer(palette = "Blues")
   } else if (color_palette == "reds") {
     p <- p + scale_fill_brewer(palette = "Reds")
+  } else if (color_palette == "brewer_paired") {
+    p <- p + scale_fill_brewer(palette = "Paired")
+  } else if (color_palette == "brewer_brbg") {
+    p <- p + scale_fill_brewer(palette = "BrBG")
   }
   
   return(p)
