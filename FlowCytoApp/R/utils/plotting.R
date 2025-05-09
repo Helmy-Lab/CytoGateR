@@ -29,6 +29,10 @@ createDimReductionPlot <- function(plot_data, dim1, dim2, colorBy = NULL,
       p <- p + scale_color_viridis_d()
     } else if (color_palette == "plasma") {
       p <- p + scale_color_viridis_d(option = "plasma")
+    } else if (color_palette == "magma") {
+      p <- p + scale_color_viridis_d(option = "magma")
+    } else if (color_palette == "inferno") {
+      p <- p + scale_color_viridis_d(option = "inferno")
     } else if (color_palette == "blues") {
       p <- p + scale_color_brewer(palette = "Blues")
     } else if (color_palette == "reds") {
@@ -77,15 +81,38 @@ convertToPlotly <- function(ggplot_obj, width = 800, height = 600, font_size = 1
 # Function to create a heatmap of cluster expression profiles
 createClusterHeatmap <- function(centers, method = "Hierarchical", 
                                  title = "Cluster Expression Profiles",
-                                 font_size = 12, cluster_rows = TRUE) {
+                                 font_size = 12, cluster_rows = TRUE,
+                                 population_data = NULL) {
   
   # Convert matrix to data frame for ggplot
   centers_df <- as.data.frame(centers) %>%
     tibble::rownames_to_column("Cluster") %>%
     reshape2::melt(id.vars = "Cluster", variable.name = "Marker", value.name = "Expression")
   
+  # If population data is available, use it to modify cluster labels
+  if (!is.null(population_data) && "Population" %in% colnames(population_data)) {
+    # Create a mapping from cluster to population
+    pop_mapping <- setNames(
+      population_data$Population,
+      as.character(population_data$Cluster)
+    )
+    
+    # Add population labels to centers_df
+    centers_df$ClusterLabel <- sapply(centers_df$Cluster, function(clust) {
+      cluster_num <- gsub("Cluster ", "", clust)
+      if (cluster_num %in% names(pop_mapping)) {
+        paste0(clust, " (", pop_mapping[cluster_num], ")")
+      } else {
+        clust
+      }
+    })
+  } else {
+    # If no population data, use cluster as is
+    centers_df$ClusterLabel <- centers_df$Cluster
+  }
+  
   # Create heatmap
-  p <- ggplot(centers_df, aes(x = Marker, y = Cluster, fill = Expression)) +
+  p <- ggplot(centers_df, aes(x = Marker, y = ClusterLabel, fill = Expression)) +
     geom_tile() +
     scale_fill_gradient2(low = "navy", mid = "white", high = "firebrick3") +
     labs(
@@ -286,19 +313,88 @@ createMarkerExpressionPlot <- function(plot_data, marker, color_palette = "virid
       panel.grid.minor = element_blank()
     )
   
-  # Apply color palette
+  # Get the number of clusters to properly handle color palette expansion
+  n_clusters <- length(unique(plot_data$Cluster))
+  
+  # Generate appropriate palette with enough colors
   if (color_palette == "viridis") {
-    p <- p + scale_fill_viridis_d()
+    # Generate exactly as many colors as needed with viridis
+    palette_colors <- viridis::viridis(n_clusters)
+    p <- p + scale_fill_manual(values = palette_colors)
   } else if (color_palette == "plasma") {
-    p <- p + scale_fill_viridis_d(option = "plasma")
+    # Generate exactly as many colors as needed with plasma
+    palette_colors <- viridis::plasma(n_clusters)
+    p <- p + scale_fill_manual(values = palette_colors)
+  } else if (color_palette == "magma") {
+    # Generate exactly as many colors as needed with magma
+    palette_colors <- viridis::magma(n_clusters)
+    p <- p + scale_fill_manual(values = palette_colors)
+  } else if (color_palette == "inferno") {
+    # Generate exactly as many colors as needed with inferno
+    palette_colors <- viridis::inferno(n_clusters)
+    p <- p + scale_fill_manual(values = palette_colors)
   } else if (color_palette == "blues") {
-    p <- p + scale_fill_brewer(palette = "Blues")
+    # Blues only has 9 colors max, so we need to handle expansion
+    max_blues <- 9
+    min_colors <- 3 # RColorBrewer requires minimum 3 colors
+    
+    if (n_clusters < min_colors) {
+      # If fewer than minimum, get minimum then take what we need
+      palette_colors <- RColorBrewer::brewer.pal(min_colors, "Blues")[1:n_clusters]
+    } else if (n_clusters <= max_blues) {
+      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "Blues")
+    } else {
+      # Get max colors then recycle
+      palette_colors <- RColorBrewer::brewer.pal(max_blues, "Blues")
+      palette_colors <- rep_len(palette_colors, n_clusters)
+    }
+    p <- p + scale_fill_manual(values = palette_colors)
   } else if (color_palette == "reds") {
-    p <- p + scale_fill_brewer(palette = "Reds")
+    # Reds only has 9 colors max
+    max_reds <- 9
+    min_colors <- 3 # RColorBrewer requires minimum 3 colors
+    
+    if (n_clusters < min_colors) {
+      palette_colors <- RColorBrewer::brewer.pal(min_colors, "Reds")[1:n_clusters]
+    } else if (n_clusters <= max_reds) {
+      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "Reds")
+    } else {
+      palette_colors <- RColorBrewer::brewer.pal(max_reds, "Reds")
+      palette_colors <- rep_len(palette_colors, n_clusters)
+    }
+    p <- p + scale_fill_manual(values = palette_colors)
   } else if (color_palette == "brewer_paired") {
-    p <- p + scale_fill_brewer(palette = "Paired")
+    # Paired has 12 colors max
+    max_paired <- 12
+    min_colors <- 3
+    
+    if (n_clusters < min_colors) {
+      palette_colors <- RColorBrewer::brewer.pal(min_colors, "Paired")[1:n_clusters]
+    } else if (n_clusters <= max_paired) {
+      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "Paired")
+    } else {
+      palette_colors <- RColorBrewer::brewer.pal(max_paired, "Paired")
+      palette_colors <- rep_len(palette_colors, n_clusters)
+    }
+    p <- p + scale_fill_manual(values = palette_colors)
   } else if (color_palette == "brewer_brbg") {
-    p <- p + scale_fill_brewer(palette = "BrBG")
+    # BrBG has 11 colors max
+    max_brbg <- 11
+    min_colors <- 3
+    
+    if (n_clusters < min_colors) {
+      palette_colors <- RColorBrewer::brewer.pal(min_colors, "BrBG")[1:n_clusters]
+    } else if (n_clusters <= max_brbg) {
+      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "BrBG")
+    } else {
+      palette_colors <- RColorBrewer::brewer.pal(max_brbg, "BrBG")
+      palette_colors <- rep_len(palette_colors, n_clusters)
+    }
+    p <- p + scale_fill_manual(values = palette_colors)
+  } else {
+    # Default to viridis if unrecognized palette
+    palette_colors <- viridis::viridis(n_clusters)
+    p <- p + scale_fill_manual(values = palette_colors)
   }
   
   return(p)

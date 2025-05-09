@@ -13,6 +13,25 @@ ui <- fluidPage(
       Shiny.setInputValue('showBatchPreprocessing', false);
       Shiny.setInputValue('showBatchAdvancedCluster', false);
     });"),
+    tags$script("
+      Shiny.addCustomMessageHandler('refreshClusterPlot', function(message) {
+        if (Shiny.shinyapp.$bindings.clusterPlot) {
+          Shiny.shinyapp.$bindings.clusterPlot.forceUpdate();
+        }
+        if (Shiny.shinyapp.$bindings['raw_data-clusterPlot']) {
+          Shiny.shinyapp.$bindings['raw_data-clusterPlot'].forceUpdate();
+        }
+        if (Shiny.shinyapp.$bindings['batch_analysis-sampleClusterPlot']) {
+          Shiny.shinyapp.$bindings['batch_analysis-sampleClusterPlot'].forceUpdate();
+        }
+        if (Shiny.shinyapp.$bindings['batch_analysis-controlSamplePlot']) {
+          Shiny.shinyapp.$bindings['batch_analysis-controlSamplePlot'].forceUpdate();
+        }
+        if (Shiny.shinyapp.$bindings['batch_analysis-treatedSamplePlot']) {
+          Shiny.shinyapp.$bindings['batch_analysis-treatedSamplePlot'].forceUpdate();
+        }
+      });
+    "),
     tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")
   ),
   
@@ -43,8 +62,8 @@ server <- function(input, output, session) {
     plot_settings = list(
       width = 800,
       height = 500,
-      font_size = 12,
-      point_size = 6,
+      font_size = 18,
+      point_size = 10,
       color_palette = "viridis"
     )
   )

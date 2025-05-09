@@ -1,8 +1,38 @@
 /* Custom CSS for Flow Cytometry Analysis Tool */
 
+/* Global font size increase for better readability */
+body, .container-fluid, .form-control, button, .btn, select, input, label, .dataTables_info, .dataTables_paginate {
+  font-size: 18px !important;
+}
+
+/* Make table content more readable */
+.dataTable td, .dataTable th {
+  font-size: 17px !important;
+  padding: 10px 12px !important;
+}
+
+/* Increase heading font sizes */
+h1 { font-size: 32px !important; }
+h2 { font-size: 28px !important; }
+h3 { font-size: 24px !important; }
+h4 { font-size: 22px !important; }
+h5 { font-size: 20px !important; }
+
+/* Make tab text more prominent */
+.nav-tabs > li > a {
+  font-size: 18px !important;
+  font-weight: 500;
+}
+
 /* Improve readability of all plot text */
 .plotly text, .ggplot text, .plot text {
   font-family: 'Arial', sans-serif !important;
+  font-size: 16px !important;
+}
+
+/* Additional spacing for UI elements to accommodate larger text */
+.form-group {
+  margin-bottom: 18px;
 }
 
 /* Add some spacing between UI elements */
@@ -10,6 +40,7 @@
   margin-bottom: 15px; 
   border-radius: 6px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  padding: 18px;
 }
 
 /* Ensure consistent widths for buttons */
@@ -87,6 +118,8 @@ h4 {
   border-radius: 5px;
   padding: 5px;
   background-color: white;
+  margin-bottom: 25px; /* Add bottom margin to all plots */
+  position: relative; /* Ensure proper stacking context */
 }
 
 /* Make warning messages more prominent */
@@ -96,8 +129,8 @@ h4 {
 
 /* Improve checkboxes and radio buttons */
 .checkbox, .radio {
-  margin-top: 5px;
-  margin-bottom: 5px;
+  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
 /* Better hover effects for buttons */
@@ -109,4 +142,55 @@ h4 {
 .form-control:focus {
   border-color: #18bc9c;
   box-shadow: 0 0 5px rgba(24, 188, 156, 0.3);
+}
+
+/* New styles to prevent plot/button clashing */
+
+/* Add proper spacing between plots and controls */
+.plot-container-wrapper {
+  margin-bottom: 60px;
+  position: relative;
+  clear: both;
+}
+
+/* Ensure controls are properly positioned and don't overlap plots */
+.control-panel {
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  margin-top: 30px;
+  margin-bottom: 30px;
+  border: 1px solid #e9ecef;
+  clear: both;
+}
+
+/* Fix plot positioning */
+.shiny-plot-output, .plotly-graph-div {
+  overflow: visible !important;
+  margin-bottom: 30px !important; 
+  z-index: 1;
+}
+
+/* Ensure buttons have proper z-index and don't get hidden */
+.btn {
+  position: relative;
+  z-index: 10;
+}
+
+/* Add clearfix to prevent layout issues */
+.row::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+/* Add spacing after horizontal rules */
+hr {
+  margin-top: 30px;
+  margin-bottom: 30px;
+}
+
+/* Better control placement for checkboxes in button rows */
+.checkbox-inline {
+  padding-top: 8px;
 }

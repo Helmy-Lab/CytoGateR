@@ -923,6 +923,15 @@ rawDataModuleServer <- function(id, app_state) {
     })
     
     # Cluster visualization in dedicated tab
+    # Make clusterPlot reactive to palette changes
+    observe({
+      # This observer will re-run whenever plot settings change
+      app_state$plot_settings
+      
+      # Force the clusterPlot to invalidate and re-render
+      session$sendCustomMessage(type = "refreshClusterPlot", message = list())
+    })
+    
     output$clusterPlot <- renderPlotly({
       req(processedData())
       
@@ -962,13 +971,8 @@ rawDataModuleServer <- function(id, app_state) {
         
         # Use population names for coloring
         color_by <- "Population"
-        hover_text <- paste(
-          "Cluster:", plot_data$Cluster,
-          "<br>Population:", plot_data$Population
-        )
       } else {
         color_by <- "Cluster"
-        hover_text <- paste("Cluster:", plot_data$Cluster)
       }
       
       # Choose appropriate dimensions
@@ -987,70 +991,21 @@ rawDataModuleServer <- function(id, app_state) {
         dim_labels <- input$selectedMarkers[1:2]
       }
       
-      # Add dimension info to hover text
-      hover_text <- paste0(
-        hover_text,
-        "<br>", dim_labels[1], ":", round(plot_data[[dim1]], 2),
-        "<br>", dim_labels[2], ":", round(plot_data[[dim2]], 2)
-      )
+      # Create a base ggplot with correct color palette
+      p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], color = .data[[color_by]])) +
+        geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2) +
+        get_color_palette(app_state$plot_settings$color_palette) +
+        labs(
+          title = paste("Clusters from", cluster_data$method),
+          x = dim_labels[1],
+          y = dim_labels[2],
+          color = if(color_by == "Population") "Cell Population" else "Cluster"
+        ) +
+        get_standard_theme(app_state$plot_settings$font_size)
       
-      # Create plot - apply all global settings
-      p <- plot_ly(plot_data, 
-                   x = ~.data[[dim1]], 
-                   y = ~.data[[dim2]],
-                   color = ~.data[[color_by]], 
-                   type = "scatter", 
-                   mode = "markers",
-                   marker = list(
-                     size = app_state$plot_settings$point_size,
-                     opacity = 0.7
-                   ),
-                   text = hover_text) %>%
+      # Convert to plotly
+      p_plotly <- ggplotly(p, tooltip = c("color", "x", "y")) %>%
         layout(
-          title = list(
-            text = paste("Clusters from", cluster_data$method),
-            font = list(
-              size = app_state$plot_settings$font_size * 1.2,
-              family = "Arial",
-              color = "black"
-            )
-          ),
-          xaxis = list(
-            title = list(
-              text = dim_labels[1],
-              font = list(
-                size = app_state$plot_settings$font_size,
-                family = "Arial",
-                color = "black"
-              )
-            ),
-            tickfont = list(
-              size = app_state$plot_settings$font_size * 0.8
-            ),
-            zeroline = TRUE,
-            zerolinecolor = "#888888",
-            zerolinewidth = 1,
-            showgrid = TRUE,
-            gridcolor = "#EEEEEE"
-          ),
-          yaxis = list(
-            title = list(
-              text = dim_labels[2],
-              font = list(
-                size = app_state$plot_settings$font_size,
-                family = "Arial",
-                color = "black"
-              )
-            ),
-            tickfont = list(
-              size = app_state$plot_settings$font_size * 0.8
-            ),
-            zeroline = TRUE,
-            zerolinecolor = "#888888",
-            zerolinewidth = 1,
-            showgrid = TRUE,
-            gridcolor = "#EEEEEE"
-          ),
           legend = list(
             title = list(
               text = if(color_by == "Population") "Cell Population" else "Cluster",
@@ -1067,13 +1022,6 @@ rawDataModuleServer <- function(id, app_state) {
             bordercolor = "rgba(0, 0, 0, 0.2)",
             borderwidth = 1
           ),
-          margin = list(
-            l = 80,
-            r = 50,
-            b = 80,
-            t = 100,
-            pad = 5
-          ),
           hoverlabel = list(
             bgcolor = "white",
             font = list(
@@ -1081,45 +1029,9 @@ rawDataModuleServer <- function(id, app_state) {
               size = app_state$plot_settings$font_size * 0.9
             )
           ),
-          grid = list(
-            ygap = 0.1, 
-            xgap = 0.1
-          ),
-          plot_bgcolor = "#FFFFFF",
-          paper_bgcolor = "#FFFFFF",
           width = app_state$plot_settings$width,
-          height = app_state$plot_settings$height,
-          autosize = FALSE
+          height = app_state$plot_settings$height
         )
-      
-      # Apply color palette based on global settings
-      # Note: For plotly, we need to manually set colors since scale_color functions only work with ggplot
-      if (color_by %in% c("Cluster", "Population")) {
-        # For categorical data, get appropriate palette colors
-        palette_name <- app_state$plot_settings$color_palette
-        n_colors <- length(unique(plot_data[[color_by]]))
-        
-        # Get palette colors based on the selected palette
-        palette_colors <- switch(palette_name,
-          "viridis" = viridis::viridis(n_colors),
-          "plasma" = viridis::plasma(n_colors),
-          "blues" = RColorBrewer::brewer.pal(min(9, n_colors), "Blues"),
-          "reds" = RColorBrewer::brewer.pal(min(9, n_colors), "Reds"),
-          "brewer_paired" = RColorBrewer::brewer.pal(min(12, n_colors), "Paired"),
-          "brewer_brbg" = RColorBrewer::brewer.pal(min(11, n_colors), "BrBG"),
-          viridis::viridis(n_colors) # default
-        )
-        
-        # If we need more colors than a palette provides, recycle them
-        if (n_colors > length(palette_colors)) {
-          palette_colors <- rep_len(palette_colors, n_colors)
-        }
-        
-        # Update the plot with the color palette
-        p <- p %>% layout(
-          colorway = palette_colors
-        )
-      }
       
       # Add cluster labels if showing population names and user has enabled labels
       if (color_by == "Population" && clustering_results$showPopulationLabels() && input$showClusterLabels) {
@@ -1134,7 +1046,7 @@ rawDataModuleServer <- function(id, app_state) {
         
         # Add annotations to plot
         for (i in 1:nrow(cluster_centers)) {
-          p <- p %>% add_annotations(
+          p_plotly <- p_plotly %>% add_annotations(
             x = cluster_centers$x[i],
             y = cluster_centers$y[i],
             text = cluster_centers$Population[i],
@@ -1152,7 +1064,7 @@ rawDataModuleServer <- function(id, app_state) {
         }
       }
       
-      return(p)
+      return(p_plotly)
     })
     
     # Cluster heatmap
@@ -1162,6 +1074,13 @@ rawDataModuleServer <- function(id, app_state) {
       # Use original centers but update if merged
       centers <- clustering_results$clustering_results()$centers
       method <- clustering_results$clustering_results()$method
+      
+      # Get population data
+      if (mergeHistory()$active) {
+        population_data <- mergeHistory()$current_mapping
+      } else {
+        population_data <- clustering_results$populations()
+      }
       
       # If using merged clusters, adjust the centers
       if (mergeHistory()$active) {
@@ -1202,7 +1121,8 @@ rawDataModuleServer <- function(id, app_state) {
         centers = centers,
         method = method,
         title = "Cluster Intensity Profiles",
-        font_size = app_state$plot_settings$font_size
+        font_size = app_state$plot_settings$font_size,
+        population_data = population_data
       )
     }, width = function() app_state$plot_settings$width,
     height = function() app_state$plot_settings$height)

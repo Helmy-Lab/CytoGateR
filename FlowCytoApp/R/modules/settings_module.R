@@ -18,14 +18,16 @@ settingsModuleUI <- function(id) {
                          min = 300, max = 1200, value = 800, step = 50),
              
              sliderInput(ns("global_font_size"), "Base Font Size", 
-                         min = 8, max = 36, value = 12, step = 1),
+                         min = 8, max = 36, value = 18, step = 1),
              
              sliderInput(ns("global_point_size"), "Point Size", 
-                         min = 2, max = 12, value = 6, step = 1),
+                         min = 2, max = 12, value = 10, step = 1),
              
              radioButtons(ns("global_color_palette"), "Color Palette",
                           choices = c("Viridis" = "viridis", 
                                       "Plasma" = "plasma", 
+                                      "Magma" = "magma",
+                                      "Inferno" = "inferno",
                                       "Blues" = "blues",
                                       "Reds" = "reds",
                                       "Paired (Categorical)" = "brewer_paired",
@@ -39,8 +41,8 @@ settingsModuleUI <- function(id) {
     column(8,
            wellPanel(
              h4("Plot Preview", style = "text-align: center; font-weight: bold;"),
-             # Plot preview will be added here
-             plotOutput(ns("settings_preview"), height = "400px")
+             # Plot preview with dynamic sizing
+             uiOutput(ns("preview_container"))
            )
     )
   )
@@ -87,7 +89,8 @@ settingsModuleServer <- function(id, app_state) {
         geom_point(size = point_size/2, alpha = 0.7) +
         labs(
           title = "Preview: Clustering Example",
-          subtitle = paste0("Font Size: ", font_size, ", Point Size: ", point_size),
+          subtitle = paste0("Width: ", input$global_plot_width, "px, Height: ", input$global_plot_height, 
+                           "px, Font: ", font_size, "pt, Points: ", point_size),
           x = "Dimension 1",
           y = "Dimension 2"
         ) +
@@ -98,6 +101,10 @@ settingsModuleServer <- function(id, app_state) {
         p <- p + scale_color_viridis_d()
       } else if (palette == "plasma") {
         p <- p + scale_color_viridis_d(option = "plasma")
+      } else if (palette == "magma") {
+        p <- p + scale_color_viridis_d(option = "magma")
+      } else if (palette == "inferno") {
+        p <- p + scale_color_viridis_d(option = "inferno")
       } else if (palette == "blues") {
         p <- p + scale_color_brewer(palette = "Blues")
       } else if (palette == "reds") {
@@ -109,7 +116,7 @@ settingsModuleServer <- function(id, app_state) {
       }
       
       return(p)
-    })
+    }, width = function() input$global_plot_width, height = function() input$global_plot_height)
     
     # Update global settings when apply button is clicked
     observeEvent(input$apply_plot_settings, {
@@ -121,7 +128,21 @@ settingsModuleServer <- function(id, app_state) {
         color_palette = input$global_color_palette
       )
       
+      # Force a refresh of all plots
+      session$sendCustomMessage(type = "refreshClusterPlot", message = list())
+      
       showNotification("Plot settings applied to all visualizations", type = "message")
+    })
+    
+    # Dynamic container for the plot preview
+    output$preview_container <- renderUI({
+      # Create a div with responsive styling
+      div(
+        style = paste0("width: 100%; max-width: ", input$global_plot_width, "px; margin: 0 auto;"),
+        plotOutput(session$ns("settings_preview"), 
+                  height = paste0(input$global_plot_height, "px"),
+                  width = "100%")
+      )
     })
     
     # Return values that might be needed by other modules

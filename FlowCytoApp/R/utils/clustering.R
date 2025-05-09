@@ -224,50 +224,80 @@ identify_cell_populations <- function(cluster_centers, marker_names,
   
   # Define cell population templates based on this panel
   cell_population_templates <- list(
+    # "CD4+ T cells" = list(
+    #   high = c("CD3", "CD4"),
+    #   medium = c(),
+    #   low = c("FOXP3", "BCL6")
+    # ),
+    # "Regulatory T cells" = list(
+    #   high = c("CD3", "CD4", "FOXP3"),
+    #   medium = c(),
+    #   low = c("BCL6", "CXCR5")
+    # ),
+    # "T follicular helper cells" = list(
+    #   high = c("CD3", "CD4", "CXCR5", "BCL6"),
+    #   medium = c(),
+    #   low = c("FOXP3")
+    # ),
+    # "MHCII+ APCs" = list(
+    #   high = c("MHCII"),
+    #   medium = c(),
+    #   low = c("CD3", "CD4")
+    # ),
+    # "Proliferating T cells" = list(
+    #   high = c("CD3", "KI67"),
+    #   medium = c(),
+    #   low = c()
+    # ),
+    # "Proliferating Tregs" = list(
+    #   high = c("CD3", "CD4", "FOXP3", "KI67"),
+    #   medium = c(),
+    #   low = c("BCL6", "CXCR5")
+    # ),
+    # "Proliferating Tfh cells" = list(
+    #   high = c("CD3", "CD4", "CXCR5", "BCL6", "KI67"),
+    #   medium = c(),
+    #   low = c("FOXP3")
+    # ),
+    # "Activated T cells" = list(
+    #   high = c("CD3", "MHCII"),
+    #   medium = c(),
+    #   low = c()
+    # ),
+    "Total T cells" = list(
+      high = c("CD3"),
+      medium = c(),
+      low = c("MHCII")
+    ),
     "CD4+ T cells" = list(
       high = c("CD3", "CD4"),
       medium = c(),
-      low = c("FOXP3", "BCL6")
+      low = c()
     ),
-    "CD8+ T cells (inferred)" = list(
+    "CD8+ T cells" = list(
       high = c("CD3"),
       medium = c(),
-      low = c("CD4", "FOXP3", "BCL6")
+      low = c("CD4")
     ),
-    "Regulatory T cells" = list(
+    "T helper 1 (TH1)" = list(
+      high = c("CD3", "CD4", "CXCR3"),
+      medium = c(),
+      low = c("FOXP3")
+    ),
+    "T regulatory (Treg)" = list(
       high = c("CD3", "CD4", "FOXP3"),
       medium = c(),
-      low = c("BCL6", "CXCR5")
+      low = c("CXCR3")
     ),
-    "T follicular helper cells" = list(
+    "T follicular helper (TFH)" = list(
       high = c("CD3", "CD4", "CXCR5", "BCL6"),
       medium = c(),
-      low = c("FOXP3")
+      low = c()
     ),
-    "MHCII+ APCs" = list(
+    "B cells" = list(
       high = c("MHCII"),
       medium = c(),
-      low = c("CD3", "CD4")
-    ),
-    "Proliferating T cells" = list(
-      high = c("CD3", "KI67"),
-      medium = c(),
-      low = c()
-    ),
-    "Proliferating Tregs" = list(
-      high = c("CD3", "CD4", "FOXP3", "KI67"),
-      medium = c(),
-      low = c("BCL6", "CXCR5")
-    ),
-    "Proliferating Tfh cells" = list(
-      high = c("CD3", "CD4", "CXCR5", "BCL6", "KI67"),
-      medium = c(),
-      low = c("FOXP3")
-    ),
-    "Activated T cells" = list(
-      high = c("CD3", "MHCII"),
-      medium = c(),
-      low = c()
+      low = c("CD3")
     )
   )
   
