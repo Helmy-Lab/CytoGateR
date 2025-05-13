@@ -171,28 +171,35 @@ batchAnalysisModuleUI <- function(id) {
                  conditionalPanel(
                    condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
                    hr(),
-                   # Added a container div with margin-bottom to create space between plot and controls
+                   # Increased margin-bottom to create more space between plot and controls
                    div(
                      class = "plot-container-wrapper",
-                     style = "margin-bottom: 80px; position: relative;",
+                     style = "margin-bottom: 120px; position: relative; overflow: visible;",
                      fluidRow(
                        column(12, h4("Clustering Visualization", align = "center")),
                        column(6, shinycssloaders::withSpinner(plotlyOutput(ns("sampleClusterPlot"), height = "500px"))),
                        column(6, shinycssloaders::withSpinner(plotOutput(ns("sampleHeatmap"), height = "500px")))
                      )
                    ),
-                   # Added a well panel to visually separate controls from plots
+                   # Added a well panel with increased vertical spacing
                    div(
                      class = "control-panel",
-                     style = "background-color: #f8f9fa; border-radius: 5px; margin-top: 20px; margin-bottom: 20px;",
+                     style = "background-color: #f8f9fa; border-radius: 5px; margin-top: 80px; margin-bottom: 40px; padding: 15px; position: relative; z-index: 100;",
                      fluidRow(
-                       column(12, h4("Cluster Management", align = "center", style = "margin-top: 5px;")),
-                       column(4, actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
-                                            class = "btn-primary", style = "width: 100%")),
-                       column(4, actionButton(ns("resetMerging"), "Reset to Original Clusters", 
-                                            class = "btn-warning", style = "width: 100%")),
-                       column(4, div(style = "margin-top: 10px;", 
-                              checkboxInput(ns("showClusterLabels"), "Show Population Labels", value = TRUE)))
+                       column(12, h4("Cluster Management", align = "center", style = "margin-top: 0px; margin-bottom: 15px;")),
+                       column(12, 
+                         div(
+                           style = "display: flex; justify-content: center; gap: 10px;",
+                           actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
+                                     class = "btn-info", icon = icon("object-group"), 
+                                     style = "width: auto; font-size: 14px;"),
+                           actionButton(ns("resetMerging"), "Reset to Original Clusters", 
+                                     class = "btn-warning", icon = icon("undo"), 
+                                     style = "width: auto; font-size: 14px;"),
+                           div(style = "margin-left: 10px; padding-top: 5px;", 
+                              checkboxInput(ns("showClusterLabels"), "Show Population Labels", value = TRUE))
+                         )
+                       )
                      )
                    ),
                    hr(),
@@ -842,6 +849,13 @@ batchAnalysisModuleServer <- function(id, app_state) {
     
     # Render individual sample dimensionality reduction plot
     output$sampleDimensionalityPlot <- renderPlotly({
+      # Explicitly use plot settings to force reactivity
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      plot_width <- app_state$plot_settings$width
+      plot_height <- app_state$plot_settings$height
+      
       req(input$viewSample)
       results <- batchResults()
       if (is.null(results) || is.null(results[[input$viewSample]])) {
@@ -877,26 +891,94 @@ batchAnalysisModuleServer <- function(id, app_state) {
         
         # Create a ggplot object first
         p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]], text = hover_text)) +
-          geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2) +
-          get_color_palette(app_state$plot_settings$color_palette) +
+          geom_point(alpha = 0.7, size = point_size/2) +
+          get_color_palette(color_palette) +
           labs(
             title = paste(sample$dim_red_method, "Plot Colored by", if(color_by == "Population") "Cell Population" else "Cluster"),
             x = paste(sample$dim_red_method, "1"),
             y = paste(sample$dim_red_method, "2"),
             color = if(color_by == "Population") "Cell Population" else "Cluster"
           ) +
-          get_standard_theme(app_state$plot_settings$font_size)
+          get_standard_theme(font_size) +
+          coord_fixed(ratio = 1) # Add fixed coordinate ratio to prevent squeezing
         
-        # Convert to plotly
-        ggplotly(p, tooltip = "text") %>% 
-          layout(
-            height = app_state$plot_settings$height, 
-            width = app_state$plot_settings$width,
-            hoverlabel = list(
-              bgcolor = "white",
-              font = list(family = "Arial", size = app_state$plot_settings$font_size)
+        # Convert to plotly with completely explicit font settings
+        p_plotly <- ggplotly(p, tooltip = "text", width = plot_width, height = plot_height)
+        
+        # Apply completely explicit font settings to ensure they're properly applied
+        p_plotly <- p_plotly %>% layout(
+          font = list(
+            family = "Arial",
+            size = font_size,
+            color = "black"
+          ),
+          title = list(
+            text = paste(sample$dim_red_method, "Plot Colored by", if(color_by == "Population") "Cell Population" else "Cluster"),
+            font = list(
+              family = "Arial",
+              size = font_size * 1.2,
+              color = "black"
             )
-          )
+          ),
+          xaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "1"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            ),
+            scaleanchor = "y",
+            scaleratio = 1
+          ),
+          yaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "2"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            )
+          ),
+          legend = list(
+            title = list(
+              text = if(color_by == "Population") "Cell Population" else "Cluster",
+              font = list(
+                family = "Arial",
+                size = font_size,
+                color = "black"
+              )
+            ),
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9,
+              color = "black"
+            ),
+            bgcolor = "rgba(255, 255, 255, 0.9)",
+            bordercolor = "rgba(0, 0, 0, 0.2)",
+            borderwidth = 1
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9
+            )
+          ),
+          margin = list(b = 100, l = 80, t = 100, r = 80)
+        )
+        
+        return(p_plotly)
       } else {
         # If no clustering, create a simple plot
         hover_text <- paste(
@@ -913,28 +995,77 @@ batchAnalysisModuleServer <- function(id, app_state) {
         
         # Create a ggplot object first
         p <- ggplot(plot_data, aes(x = dim1, y = dim2, text = hover_text)) +
-          geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2, color = "#3366CC") +
+          geom_point(alpha = 0.7, size = point_size/2, color = "#3366CC") +
           labs(
             title = paste(sample$dim_red_method, "Plot"),
             x = paste(sample$dim_red_method, "1"),
             y = paste(sample$dim_red_method, "2")
           ) +
-          get_standard_theme(app_state$plot_settings$font_size)
+          get_standard_theme(font_size) +
+          coord_fixed(ratio = 1) # Add fixed coordinate ratio to prevent squeezing
         
-        # Convert to plotly
-        ggplotly(p, tooltip = "text") %>% 
-          layout(
-            height = app_state$plot_settings$height, 
-            width = app_state$plot_settings$width,
-            hoverlabel = list(
-              bgcolor = "white",
-              font = list(family = "Arial", size = app_state$plot_settings$font_size)
+        # Convert to plotly with completely explicit font settings
+        p_plotly <- ggplotly(p, tooltip = "text", width = plot_width, height = plot_height)
+        
+        # Apply completely explicit font settings to ensure they're properly applied
+        p_plotly <- p_plotly %>% layout(
+          font = list(
+            family = "Arial",
+            size = font_size,
+            color = "black"
+          ),
+          title = list(
+            text = paste(sample$dim_red_method, "Plot"),
+            font = list(
+              family = "Arial",
+              size = font_size * 1.2,
+              color = "black"
             )
-          )
+          ),
+          xaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "1"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            ),
+            scaleanchor = "y",
+            scaleratio = 1
+          ),
+          yaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "2"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            )
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9
+            )
+          ),
+          margin = list(b = 100, l = 80, t = 100, r = 80)
+        )
+        
+        return(p_plotly)
       }
     })
     
-    # Render sample cluster plot
     # Make cluster plot reactive to palette changes
     observe({
       # This observer will re-run whenever plot settings change
@@ -944,7 +1075,29 @@ batchAnalysisModuleServer <- function(id, app_state) {
       session$sendCustomMessage(type = "refreshClusterPlot", message = list())
     })
     
+    # NEW: Make all dimensionality reduction plots reactive to plot settings changes
+    observe({
+      # This observer will re-run whenever plot settings change
+      app_state$plot_settings
+      
+      # Force the dimensionality reduction plots to invalidate
+      session$sendCustomMessage(type = "refreshPlots", message = list())
+      
+      # Explicitly invalidate all plotly outputs to force redraw with new font settings
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("sampleDimensionalityPlot")))
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("controlSamplePlot")))
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("treatedSamplePlot")))
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("markerExpressionByCluster")))
+    })
+    
     output$sampleClusterPlot <- renderPlotly({
+      # Force reactivity to plot settings - convert to local variables
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
       req(input$viewSample)
       results <- batchResults()
       if (is.null(results) || is.null(results[[input$viewSample]])) {
@@ -986,48 +1139,94 @@ batchAnalysisModuleServer <- function(id, app_state) {
       
       # Create a base ggplot with correct color palette
       p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]])) +
-        geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2) +
-        get_color_palette(app_state$plot_settings$color_palette) +
+        geom_point(alpha = 0.7, size = point_size/2) +
+        get_color_palette(color_palette) +
         labs(
-          title = paste("Cluster Plot -", sample$cluster_results$method),
+          title = paste("Clusters from", sample$cluster_results$method),
           x = paste(sample$dim_red_method, "1"),
           y = paste(sample$dim_red_method, "2"),
           color = if(color_by == "Population") "Cell Population" else "Cluster"
         ) +
-        get_standard_theme(app_state$plot_settings$font_size)
+        get_standard_theme(font_size)
       
-      # Convert to plotly
-      p_plotly <- ggplotly(p, tooltip = c("color", "x", "y")) %>%
-        layout(
-          legend = list(
-            title = list(
-              text = if(color_by == "Population") "Cell Population" else "Cluster",
-              font = list(
-                size = app_state$plot_settings$font_size,
-                family = "Arial"
-              )
-            ),
-            font = list(
-              size = app_state$plot_settings$font_size * 0.9,
-              family = "Arial"
-            ),
-            bgcolor = "rgba(255, 255, 255, 0.9)",
-            bordercolor = "rgba(0, 0, 0, 0.2)",
-            borderwidth = 1
-          ),
-          hoverlabel = list(
-            bgcolor = "white",
+      # Convert to plotly with completely explicit font settings
+      p_plotly <- ggplotly(p, tooltip = c("color", "x", "y"), width = width, height = height)
+      
+      # Apply completely explicit font settings to ensure they're properly applied
+      p_plotly <- p_plotly %>% layout(
+        font = list(
+          family = "Arial",
+          size = font_size,
+          color = "black"
+        ),
+        title = list(
+          text = paste("Clusters from", sample$cluster_results$method),
+          font = list(
+            family = "Arial",
+            size = font_size * 1.2,
+            color = "black"
+          )
+        ),
+        xaxis = list(
+          title = list(
+            text = paste(sample$dim_red_method, "1"),
             font = list(
               family = "Arial",
-              size = app_state$plot_settings$font_size * 0.9
+              size = font_size * 1.1,
+              color = "black"
             )
           ),
-          width = app_state$plot_settings$width,
-          height = app_state$plot_settings$height
-        )
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          ),
+          scaleanchor = "y",
+          scaleratio = 1
+        ),
+        yaxis = list(
+          title = list(
+            text = paste(sample$dim_red_method, "2"),
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          )
+        ),
+        legend = list(
+          title = list(
+            text = if(color_by == "Population") "Cell Population" else "Cluster",
+            font = list(
+              family = "Arial",
+              size = font_size,
+              color = "black"
+            )
+          ),
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9,
+            color = "black"
+          ),
+          bgcolor = "rgba(255, 255, 255, 0.9)",
+          bordercolor = "rgba(0, 0, 0, 0.2)",
+          borderwidth = 1
+        ),
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9
+          )
+        ),
+        margin = list(b = 120, l = 80, t = 100, r = 50)
+      )
       
-      # Add population labels if available and requested
-      if ("Population" %in% colnames(plot_data) && input$showClusterLabels) {
+      # Add cluster labels if showing population names and user has enabled labels
+      if (color_by == "Population" && isTRUE(input$showClusterLabels)) {
         # Calculate cluster centers for label positioning
         cluster_centers <- plot_data %>%
           group_by(Cluster, Population) %>%
@@ -1052,7 +1251,7 @@ batchAnalysisModuleServer <- function(id, app_state) {
             bgcolor = "rgba(255, 255, 255, 0.8)",
             bordercolor = "rgba(0, 0, 0, 0.5)",
             borderwidth = 1,
-            font = list(size = app_state$plot_settings$font_size)
+            font = list(size = font_size)
           )
         }
       }
@@ -1174,6 +1373,13 @@ batchAnalysisModuleServer <- function(id, app_state) {
     
     # Single sample marker expression by cluster
     output$markerExpressionByCluster <- renderPlotly({
+      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
       req(input$viewSample, input$sampleMarkerSelect)
       results <- batchResults()
       
@@ -1194,25 +1400,78 @@ batchAnalysisModuleServer <- function(id, app_state) {
       p <- createMarkerExpressionPlot(
         plot_data = sample$plot_data,
         marker = marker,
-        color_palette = app_state$plot_settings$color_palette,
-        font_size = app_state$plot_settings$font_size,
+        color_palette = color_palette,
+        font_size = font_size,
         include_violin = TRUE
       )
       
-      # Convert to plotly
-      ggplotly(p) %>%
-        layout(
-          height = app_state$plot_settings$height,
-          width = app_state$plot_settings$width,
-          hoverlabel = list(
-            bgcolor = "white",
-            font = list(family = "Arial", size = app_state$plot_settings$font_size)
+      # Convert to plotly with explicit font settings
+      p_plotly <- ggplotly(p, width = width, height = height)
+      
+      # Apply explicit font settings
+      p_plotly <- p_plotly %>% layout(
+        font = list(
+          family = "Arial",
+          size = font_size,
+          color = "black"
+        ),
+        title = list(
+          text = paste("Distribution of", marker, "by Cluster"),
+          font = list(
+            family = "Arial",
+            size = font_size * 1.2,
+            color = "black"
+          )
+        ),
+        xaxis = list(
+          title = list(
+            text = "Cluster",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          )
+        ),
+        yaxis = list(
+          title = list(
+            text = marker,
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          )
+        ),
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9
           )
         )
+      )
+      
+      return(p_plotly)
     })
     
     # Render comparison plots between control and treated samples
     output$controlSamplePlot <- renderPlotly({
+      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
       req(input$compareViewControl)
       results <- batchResults()
       if (is.null(results) || is.null(results[[input$compareViewControl]])) {
@@ -1232,81 +1491,180 @@ batchAnalysisModuleServer <- function(id, app_state) {
         
         # Create base ggplot with correct colors
         p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]])) +
-          geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2) +
-          get_color_palette(app_state$plot_settings$color_palette) +
+          geom_point(alpha = 0.7, size = point_size/2) +
+          get_color_palette(color_palette) +
           labs(
             title = paste("Control:", sample$name),
             x = paste(sample$dim_red_method, "1"),
             y = paste(sample$dim_red_method, "2"),
             color = if(color_by == "Population") "Cell Population" else "Cluster"
           ) +
-          get_standard_theme(app_state$plot_settings$font_size)
+          get_standard_theme(font_size) +
+          coord_fixed(ratio = 1) # Add fixed ratio for proper scaling
         
-        # Convert to plotly
-        p_plotly <- ggplotly(p, tooltip = c("color", "x", "y")) %>%
-          layout(
-            legend = list(
-              title = list(
-                text = if(color_by == "Population") "Cell Population" else "Cluster",
-                font = list(
-                  size = app_state$plot_settings$font_size,
-                  family = "Arial"
-                )
-              ),
-              font = list(
-                size = app_state$plot_settings$font_size * 0.9,
-                family = "Arial"
-              ),
-              bgcolor = "rgba(255, 255, 255, 0.9)",
-              bordercolor = "rgba(0, 0, 0, 0.2)",
-              borderwidth = 1,
-              x = 0,
-              xanchor = "left",
-              y = 1,
-              yanchor = "top"
-            ),
-            hoverlabel = list(
-              bgcolor = "white",
+        # Convert to plotly with completely explicit font settings
+        p_plotly <- ggplotly(p, tooltip = c("color", "x", "y"), width = width, height = height)
+        
+        # Apply completely explicit font settings to ensure they're properly applied
+        p_plotly <- p_plotly %>% layout(
+          font = list(
+            family = "Arial",
+            size = font_size,
+            color = "black"
+          ),
+          title = list(
+            text = paste("Control:", sample$name),
+            font = list(
+              family = "Arial",
+              size = font_size * 1.2,
+              color = "black"
+            )
+          ),
+          xaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "1"),
               font = list(
                 family = "Arial",
-                size = app_state$plot_settings$font_size * 0.9
+                size = font_size * 1.1,
+                color = "black"
               )
             ),
-            width = app_state$plot_settings$width,
-            height = app_state$plot_settings$height
-          )
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            ),
+            scaleanchor = "y",
+            scaleratio = 1
+          ),
+          yaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "2"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            )
+          ),
+          legend = list(
+            title = list(
+              text = if(color_by == "Population") "Cell Population" else "Cluster",
+              font = list(
+                family = "Arial",
+                size = font_size,
+                color = "black"
+              )
+            ),
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9,
+              color = "black"
+            ),
+            bgcolor = "rgba(255, 255, 255, 0.9)",
+            bordercolor = "rgba(0, 0, 0, 0.2)",
+            borderwidth = 1,
+            x = 0,
+            xanchor = "left",
+            y = 1,
+            yanchor = "top"
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9
+            )
+          ),
+          margin = list(b = 80, l = 80, t = 100, r = 50)
+        )
         
         return(p_plotly)
       } else {
         # If no clustering, create a simple ggplot and convert to plotly
         p <- ggplot(plot_data, aes(x = dim1, y = dim2)) +
-          geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2, color = "steelblue") +
+          geom_point(alpha = 0.7, size = point_size/2, color = "steelblue") +
           labs(
             title = paste("Control:", sample$name, "(No Clustering)"),
             x = paste(sample$dim_red_method, "1"),
             y = paste(sample$dim_red_method, "2")
           ) +
-          get_standard_theme(app_state$plot_settings$font_size)
+          get_standard_theme(font_size) +
+          coord_fixed(ratio = 1) # Add fixed ratio for proper scaling
         
-        # Convert to plotly
-        p_plotly <- ggplotly(p, tooltip = c("x", "y")) %>%
-          layout(
-            hoverlabel = list(
-              bgcolor = "white",
+        # Convert to plotly with completely explicit font settings
+        p_plotly <- ggplotly(p, tooltip = c("x", "y"), width = width, height = height)
+        
+        # Apply completely explicit font settings to ensure they're properly applied
+        p_plotly <- p_plotly %>% layout(
+          font = list(
+            family = "Arial",
+            size = font_size,
+            color = "black"
+          ),
+          title = list(
+            text = paste("Control:", sample$name, "(No Clustering)"),
+            font = list(
+              family = "Arial",
+              size = font_size * 1.2,
+              color = "black"
+            )
+          ),
+          xaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "1"),
               font = list(
                 family = "Arial",
-                size = app_state$plot_settings$font_size * 0.9
+                size = font_size * 1.1,
+                color = "black"
               )
             ),
-            width = app_state$plot_settings$width,
-            height = app_state$plot_settings$height
-          )
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            ),
+            scaleanchor = "y",
+            scaleratio = 1
+          ),
+          yaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "2"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            )
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9
+            )
+          ),
+          margin = list(b = 80, l = 80, t = 100, r = 50)
+        )
         
         return(p_plotly)
       }
     })
     
     output$treatedSamplePlot <- renderPlotly({
+      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
       req(input$compareViewTreated)
       results <- batchResults()
       if (is.null(results) || is.null(results[[input$compareViewTreated]])) {
@@ -1326,75 +1684,167 @@ batchAnalysisModuleServer <- function(id, app_state) {
         
         # Create base ggplot with correct colors
         p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]])) +
-          geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2) +
-          get_color_palette(app_state$plot_settings$color_palette) +
+          geom_point(alpha = 0.7, size = point_size/2) +
+          get_color_palette(color_palette) +
           labs(
             title = paste("Treated:", sample$name),
             x = paste(sample$dim_red_method, "1"),
             y = paste(sample$dim_red_method, "2"),
             color = if(color_by == "Population") "Cell Population" else "Cluster"
           ) +
-          get_standard_theme(app_state$plot_settings$font_size)
+          get_standard_theme(font_size) +
+          coord_fixed(ratio = 1) # Add fixed ratio for proper scaling
         
-        # Convert to plotly
-        p_plotly <- ggplotly(p, tooltip = c("color", "x", "y")) %>%
-          layout(
-            legend = list(
-              title = list(
-                text = if(color_by == "Population") "Cell Population" else "Cluster",
-                font = list(
-                  size = app_state$plot_settings$font_size,
-                  family = "Arial"
-                )
-              ),
-              font = list(
-                size = app_state$plot_settings$font_size * 0.9,
-                family = "Arial"
-              ),
-              bgcolor = "rgba(255, 255, 255, 0.9)",
-              bordercolor = "rgba(0, 0, 0, 0.2)",
-              borderwidth = 1,
-              x = 0,
-              xanchor = "left",
-              y = 1,
-              yanchor = "top"
-            ),
-            hoverlabel = list(
-              bgcolor = "white",
+        # Convert to plotly with completely explicit font settings
+        p_plotly <- ggplotly(p, tooltip = c("color", "x", "y"), width = width, height = height)
+        
+        # Apply completely explicit font settings to ensure they're properly applied
+        p_plotly <- p_plotly %>% layout(
+          font = list(
+            family = "Arial",
+            size = font_size,
+            color = "black"
+          ),
+          title = list(
+            text = paste("Treated:", sample$name),
+            font = list(
+              family = "Arial",
+              size = font_size * 1.2,
+              color = "black"
+            )
+          ),
+          xaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "1"),
               font = list(
                 family = "Arial",
-                size = app_state$plot_settings$font_size * 0.9
+                size = font_size * 1.1,
+                color = "black"
               )
             ),
-            width = app_state$plot_settings$width,
-            height = app_state$plot_settings$height
-          )
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            ),
+            scaleanchor = "y",
+            scaleratio = 1
+          ),
+          yaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "2"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            )
+          ),
+          legend = list(
+            title = list(
+              text = if(color_by == "Population") "Cell Population" else "Cluster",
+              font = list(
+                family = "Arial",
+                size = font_size,
+                color = "black"
+              )
+            ),
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9,
+              color = "black"
+            ),
+            bgcolor = "rgba(255, 255, 255, 0.9)",
+            bordercolor = "rgba(0, 0, 0, 0.2)",
+            borderwidth = 1,
+            x = 0,
+            xanchor = "left",
+            y = 1,
+            yanchor = "top"
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9
+            )
+          ),
+          margin = list(b = 80, l = 80, t = 100, r = 50)
+        )
         
         return(p_plotly)
       } else {
         # If no clustering, create a simple ggplot and convert to plotly
         p <- ggplot(plot_data, aes(x = dim1, y = dim2)) +
-          geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2, color = "firebrick") +
+          geom_point(alpha = 0.7, size = point_size/2, color = "firebrick") +
           labs(
             title = paste("Treated:", sample$name, "(No Clustering)"),
             x = paste(sample$dim_red_method, "1"),
             y = paste(sample$dim_red_method, "2")
           ) +
-          get_standard_theme(app_state$plot_settings$font_size)
+          get_standard_theme(font_size) +
+          coord_fixed(ratio = 1) # Add fixed ratio for proper scaling
         
-        # Convert to plotly
-        p_plotly <- ggplotly(p, tooltip = c("x", "y")) %>%
-          layout(
-            hoverlabel = list(
-              bgcolor = "white",
+        # Convert to plotly with completely explicit font settings
+        p_plotly <- ggplotly(p, tooltip = c("x", "y"), width = width, height = height)
+        
+        # Apply completely explicit font settings to ensure they're properly applied
+        p_plotly <- p_plotly %>% layout(
+          font = list(
+            family = "Arial",
+            size = font_size,
+            color = "black"
+          ),
+          title = list(
+            text = paste("Treated:", sample$name, "(No Clustering)"),
+            font = list(
+              family = "Arial",
+              size = font_size * 1.2,
+              color = "black"
+            )
+          ),
+          xaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "1"),
               font = list(
                 family = "Arial",
-                size = app_state$plot_settings$font_size * 0.9
+                size = font_size * 1.1,
+                color = "black"
               )
             ),
-            width = app_state$plot_settings$width,
-            height = app_state$plot_settings$height
-          )
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            ),
+            scaleanchor = "y",
+            scaleratio = 1
+          ),
+          yaxis = list(
+            title = list(
+              text = paste(sample$dim_red_method, "2"),
+              font = list(
+                family = "Arial",
+                size = font_size * 1.1,
+                color = "black"
+              )
+            ),
+            tickfont = list(
+              family = "Arial",
+              size = font_size
+            )
+          ),
+          hoverlabel = list(
+            bgcolor = "white",
+            font = list(
+              family = "Arial",
+              size = font_size * 0.9
+            )
+          ),
+          margin = list(b = 80, l = 80, t = 100, r = 50)
+        )
         
         return(p_plotly)
       }

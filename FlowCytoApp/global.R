@@ -79,12 +79,20 @@ get_fill_palette <- function(palette_name) {
 get_standard_theme <- function(font_size = 12) {
   theme_minimal(base_size = font_size) +
     theme(
-      plot.title = element_text(face = "bold", hjust = 0.5),
-      plot.subtitle = element_text(hjust = 0.5),
-      axis.title = element_text(face = "bold"),
-      legend.title = element_text(face = "bold"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = rel(1.2)),
+      plot.subtitle = element_text(hjust = 0.5, size = rel(1.0)),
+      axis.title = element_text(face = "bold", size = rel(1.1)),
+      axis.text = element_text(size = rel(1.0)),
+      legend.title = element_text(face = "bold", size = rel(1.1)),
+      legend.text = element_text(size = rel(1.0)),
+      legend.position = "right",
+      legend.background = element_rect(fill = "white", color = "gray90"),
+      legend.key = element_blank(),
       panel.grid.minor = element_blank(),
-      panel.border = element_rect(color = "grey80", fill = NA)
+      panel.grid.major = element_line(color = "gray90"),
+      panel.border = element_rect(color = "grey80", fill = NA),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.margin = margin(20, 20, 80, 20) # Increased bottom margin from 30 to 80 to prevent button overlap
     )
 }
 
@@ -95,7 +103,41 @@ create_standard_tooltip <- function(plot, height = 600, width = 800, font_size =
       bgcolor = "white",
       font = list(family = "Arial", size = font_size)
     ),
+    margin = list(b = 100, l = 80, t = 100, r = 50), # Increased bottom margin from 80 to 100
     height = height,
-    width = width
+    width = width,
+    xaxis = list(
+      title = list(
+        font = list(
+          family = "Arial",
+          size = font_size * 1.1,
+          color = "black"
+        )
+      ),
+      tickfont = list(
+        family = "Arial",
+        size = font_size
+      )
+    ),
+    yaxis = list(
+      title = list(
+        font = list(
+          family = "Arial",
+          size = font_size * 1.1,
+          color = "black"
+        )
+      ),
+      tickfont = list(
+        family = "Arial",
+        size = font_size
+      )
+    ),
+    title = list(
+      font = list(
+        family = "Arial",
+        size = font_size * 1.2,
+        color = "black"
+      )
+    )
   )
 }

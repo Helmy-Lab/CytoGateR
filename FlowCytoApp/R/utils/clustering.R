@@ -27,7 +27,7 @@ runKmeansClustering <- function(marker_data, num_clusters = 8) {
   })
 }
 
-# Function to run DBSCAN clustering
+# ---- DBSCAN Clustering ----
 runDbscanClustering <- function(marker_data, eps = 0.5, minPts = 5) {
   tryCatch({
     # Scale data for DBSCAN
@@ -45,14 +45,9 @@ runDbscanClustering <- function(marker_data, eps = 0.5, minPts = 5) {
     
     # Calculate cluster centers (mean of each cluster)
     unique_clusters <- sort(unique(cluster_ids))
-    centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(marker_data))
-    
-    for (i in seq_along(unique_clusters)) {
-      cluster_idx <- which(cluster_ids == unique_clusters[i])
-      if (length(cluster_idx) > 0) {
-        centers[i,] <- colMeans(marker_data[cluster_idx, , drop = FALSE])
-      }
-    }
+    centers <- t(sapply(unique_clusters, function(cl) {
+      colMeans(marker_data[cluster_ids == cl, , drop = FALSE])
+    }))
     
     colnames(centers) <- colnames(marker_data)
     rownames(centers) <- paste("Cluster", unique_clusters)
@@ -71,7 +66,7 @@ runDbscanClustering <- function(marker_data, eps = 0.5, minPts = 5) {
   })
 }
 
-# Function to run FlowSOM clustering
+# ---- FlowSOM Clustering ----
 runFlowSomClustering <- function(marker_data, xdim = 6, ydim = 6, n_metaclusters = 12, rlen = 10) {
   tryCatch({
     # Create a flowFrame from the matrix with proper marker names
@@ -113,14 +108,9 @@ runFlowSomClustering <- function(marker_data, xdim = 6, ydim = 6, n_metaclusters
     
     # Calculate metacluster centers (mean of each cluster)
     unique_clusters <- sort(unique(cell_metaclusters))
-    centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(marker_data))
-    
-    for (i in seq_along(unique_clusters)) {
-      cluster_idx <- which(cell_metaclusters == unique_clusters[i])
-      if (length(cluster_idx) > 0) {
-        centers[i,] <- colMeans(marker_data[cluster_idx, , drop = FALSE])
-      }
-    }
+    centers <- t(sapply(unique_clusters, function(cl) {
+      colMeans(marker_data[cell_metaclusters == cl, , drop = FALSE])
+    }))
     
     colnames(centers) <- colnames(marker_data)
     rownames(centers) <- paste("Cluster", unique_clusters)
@@ -142,7 +132,7 @@ runFlowSomClustering <- function(marker_data, xdim = 6, ydim = 6, n_metaclusters
   })
 }
 
-# Function to run Phenograph clustering
+# ---- Phenograph Clustering ----
 runPhenographClustering <- function(marker_data, k = 30) {
   tryCatch({
     # Run Phenograph
@@ -153,14 +143,9 @@ runPhenographClustering <- function(marker_data, k = 30) {
     
     # Calculate cluster centers (mean of each cluster)
     unique_clusters <- sort(unique(cluster_ids))
-    centers <- matrix(NA, nrow = length(unique_clusters), ncol = ncol(marker_data))
-    
-    for (i in seq_along(unique_clusters)) {
-      cluster_idx <- which(cluster_ids == unique_clusters[i])
-      if (length(cluster_idx) > 0) {
-        centers[i,] <- colMeans(marker_data[cluster_idx, , drop = FALSE])
-      }
-    }
+    centers <- t(sapply(unique_clusters, function(cl) {
+      colMeans(marker_data[cluster_ids == cl, , drop = FALSE])
+    }))
     
     colnames(centers) <- colnames(marker_data)
     rownames(centers) <- paste("Cluster", unique_clusters)
@@ -180,34 +165,23 @@ runPhenographClustering <- function(marker_data, k = 30) {
   })
 }
 
-# Unified function to run clustering based on method
+# ---- Unified Dispatcher ----
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
 runClustering <- function(marker_data, method, params = list()) {
-  if (method == "K-means") {
-    num_clusters <- if (!is.null(params$num_clusters)) params$num_clusters else 8
-    return(runKmeansClustering(marker_data, num_clusters))
-  } 
-  else if (method == "DBSCAN") {
-    eps <- if (!is.null(params$eps)) params$eps else 0.5
-    minPts <- if (!is.null(params$minPts)) params$minPts else 5
-    return(runDbscanClustering(marker_data, eps, minPts))
-  }
-  else if (method == "FlowSOM") {
-    xdim <- if (!is.null(params$xdim)) params$xdim else 6
-    ydim <- if (!is.null(params$ydim)) params$ydim else 6
-    n_metaclusters <- if (!is.null(params$n_metaclusters)) params$n_metaclusters else 12
-    rlen <- if (!is.null(params$rlen)) params$rlen else 10
-    return(runFlowSomClustering(marker_data, xdim, ydim, n_metaclusters, rlen))
-  }
-  else if (method == "Phenograph") {
-    k <- if (!is.null(params$k)) params$k else 30
-    return(runPhenographClustering(marker_data, k))
-  }
-  else {
-    stop("Unsupported clustering method")
-  }
+  switch(method,
+         "K-means" = runKmeansClustering(marker_data, params$num_clusters %||% 8),
+         "DBSCAN"  = runDbscanClustering(marker_data, params$eps %||% 0.5, params$minPts %||% 5),
+         "FlowSOM" = runFlowSomClustering(marker_data,
+                                          xdim = params$xdim %||% 6,
+                                          ydim = params$ydim %||% 6,
+                                          n_metaclusters = params$n_metaclusters %||% 12,
+                                          rlen = params$rlen %||% 10),
+         "Phenograph" = runPhenographClustering(marker_data, params$k %||% 30),
+         stop("Unsupported clustering method"))
 }
 
-# Function to identify cell populations based on marker expression patterns
+# ---- Cell Type Identification ----
 identify_cell_populations <- function(cluster_centers, marker_names, 
                                       high_threshold = 0.5,  
                                       low_threshold = -0.4,  
@@ -308,16 +282,8 @@ identify_cell_populations <- function(cluster_centers, marker_names,
     
     # Remove common prefixes/suffixes and special characters
     name <- gsub("FL[0-9]+-[A-Z]+ *- *", "", name)
-    name <- gsub(" +[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+$", "", name) # Remove suffixes like APC-A750-A
-    name <- gsub(" +[A-Z0-9]+-[A-Z0-9]+$", "", name)  # Remove suffixes like PE-A
-    name <- gsub(" +[A-Z]+$", "", name)  # Remove single suffix like A
-    name <- gsub("[-_\\s]+", "", name)   # Remove spaces, hyphens, underscores
-    
-    # Special cases
-    name <- gsub("^MHCII$", "MHCII", name)
-    name <- gsub("^KI-?67$", "KI67", name)
-    name <- gsub("^FOXP3$", "FOXP3", name)
-    name <- gsub("^BCL6$", "BCL6", name)
+    name <- gsub(" +[A-Z0-9]+(-[A-Z0-9]+)*$", "", name)
+    name <- gsub("[-_\\s]+", "", name)
     
     return(name)
   }
@@ -330,6 +296,7 @@ identify_cell_populations <- function(cluster_centers, marker_names,
     "FL11-A - MHC II AF647 APC-A" = "MHCII",
     "FL12-A - Foxp3 A700 APC-A700-A" = "FOXP3",
     "FL1-A - CXCR5 BV421 PB450-A" = "CXCR5",
+    "FL6-A - CXCR3 PE PE-A" = "CXCR3",  # Added CXCR3 marker
     "FL7-A - BCl6 PE PE-A" = "BCL6",
     "FL10-A - Ki67 PECy7 PC7-A" = "KI67",
     "FL3-A - Live Dead BV570 Violet610-A" = "LIVEDEAD",
@@ -340,6 +307,7 @@ identify_cell_populations <- function(cluster_centers, marker_names,
     "FL11-A" = "MHCII",
     "FL12-A" = "FOXP3",
     "FL1-A" = "CXCR5",
+    "FL6-A" = "CXCR3",  # Added CXCR3 marker
     "FL7-A" = "BCL6", 
     "FL10-A" = "KI67",
     "FL3-A" = "LIVEDEAD",
@@ -350,6 +318,7 @@ identify_cell_populations <- function(cluster_centers, marker_names,
     "MHC" = "MHCII",
     "FOXP3" = "FOXP3",
     "CXCR5" = "CXCR5",
+    "CXCR3" = "CXCR3",  # Added CXCR3 marker
     "BCL6" = "BCL6",
     "KI67" = "KI67",
     "DEAD" = "LIVEDEAD"
@@ -358,37 +327,16 @@ identify_cell_populations <- function(cluster_centers, marker_names,
   # Apply standardization to marker names
   normalized_markers <- sapply(marker_names, clean_marker_name)
   
-  # Direct map markers using our manual mapping
-  mapped_markers <- character(length(marker_names))
-  for (i in 1:length(marker_names)) {
-    # Try exact match first
-    if (marker_names[i] %in% names(manual_mapping)) {
-      mapped_markers[i] <- manual_mapping[[marker_names[i]]]
-    } 
-    # Try normalized match
-    else if (normalized_markers[i] %in% names(manual_mapping)) {
-      mapped_markers[i] <- manual_mapping[[normalized_markers[i]]]
-    }
-    # Try partial matching as a fallback
-    else {
-      for (pattern in names(manual_mapping)) {
-        if (grepl(pattern, marker_names[i], ignore.case = TRUE)) {
-          mapped_markers[i] <- manual_mapping[[pattern]]
-          break
-        }
-      }
-    }
-    
-    # If still not mapped, use normalized name
-    if (is.null(mapped_markers[i]) || mapped_markers[i] == "") {
-      mapped_markers[i] <- normalized_markers[i]
-    }
-  }
+  # Map markers using our manual mapping
+  mapped_markers <- sapply(seq_along(marker_names), function(i) {
+    raw <- marker_names[i]
+    norm <- normalized_markers[i]
+    manual_mapping[[raw]] %||% manual_mapping[[norm]] %||% norm
+  })
   
   # Calculate z-scores for all markers across clusters
   z_scores <- apply(cluster_centers, 2, function(x) {
-    if (sd(x, na.rm=TRUE) == 0) return(rep(0, length(x)))
-    return((x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE))
+    if (sd(x, na.rm=TRUE) == 0) rep(0, length(x)) else (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
   })
   
   # Add column names back to z-scores matrix
@@ -399,94 +347,67 @@ identify_cell_populations <- function(cluster_centers, marker_names,
     best_match <- "Unknown"
     best_score <- 0
     best_details <- ""
-    match_scores <- list()
     
     # Compare with each reference profile
     for (pop_name in names(cell_population_templates)) {
       template <- cell_population_templates[[pop_name]]
       score <- 0
-      total_markers <- 0
-      matching_details <- c()
-      
-      # Weight factors for different marker categories
-      high_weight <- 1.0
-      medium_weight <- 0.7
-      low_weight <- 0.5
-      
-      # Track matched markers for logging
-      matched_high <- c()
-      matched_medium <- c()
-      matched_low <- c()
+      total_weight <- 0
+      match_details <- c()
       
       # Check for high-expression markers
       for (marker in template$high) {
-        # Find index of this marker in our mapped list
-        matching_indices <- which(mapped_markers == marker)
-        
-        if (length(matching_indices) > 0) {
-          total_markers <- total_markers + high_weight
-          col_idx <- matching_indices[1]  # Take first match if multiple
-          marker_z <- z_scores[i, col_idx]
-          
-          if (!is.na(marker_z) && marker_z > high_threshold) {
-            score <- score + high_weight
-            matched_high <- c(matched_high, marker_names[col_idx])
-            matching_details <- c(matching_details, paste0(marker_names[col_idx], "(+)"))
+        idx <- which(mapped_markers == marker)
+        if (length(idx)) {
+          z <- z_scores[i, idx[1]]
+          total_weight <- total_weight + 1
+          if (!is.na(z) && z > high_threshold) {
+            score <- score + 1
+            match_details <- c(match_details, paste0(marker_names[idx[1]], "(+)"))
           }
         }
       }
       
       # Check for medium-expression markers
       for (marker in template$medium) {
-        matching_indices <- which(mapped_markers == marker)
-        
-        if (length(matching_indices) > 0) {
-          total_markers <- total_markers + medium_weight
-          col_idx <- matching_indices[1]
-          marker_z <- z_scores[i, col_idx]
-          
-          if (!is.na(marker_z) && marker_z > -0.2 && marker_z < 0.7) {  # Medium expression range
-            score <- score + medium_weight
-            matched_medium <- c(matched_medium, marker_names[col_idx])
-            matching_details <- c(matching_details, paste0(marker_names[col_idx], "(~)"))
+        idx <- which(mapped_markers == marker)
+        if (length(idx)) {
+          z <- z_scores[i, idx[1]]
+          total_weight <- total_weight + 0.7
+          if (!is.na(z) && z > -0.2 && z < 0.7) {
+            score <- score + 0.7
+            match_details <- c(match_details, paste0(marker_names[idx[1]], "(~)"))
           }
         }
       }
       
       # Check for low-expression markers
       for (marker in template$low) {
-        matching_indices <- which(mapped_markers == marker)
-        
-        if (length(matching_indices) > 0) {
-          total_markers <- total_markers + low_weight
-          col_idx <- matching_indices[1]
-          marker_z <- z_scores[i, col_idx]
-          
-          if (!is.na(marker_z) && marker_z < low_threshold) {
-            score <- score + low_weight
-            matched_low <- c(matched_low, marker_names[col_idx])
-            matching_details <- c(matching_details, paste0(marker_names[col_idx], "(-)"))
+        idx <- which(mapped_markers == marker)
+        if (length(idx)) {
+          z <- z_scores[i, idx[1]]
+          total_weight <- total_weight + 0.5
+          if (!is.na(z) && z < low_threshold) {
+            score <- score + 0.5
+            match_details <- c(match_details, paste0(marker_names[idx[1]], "(-)"))
           }
         }
       }
       
       # Calculate weighted confidence score
-      if (total_markers > 0) {
-        confidence <- score / total_markers
-        match_scores[[pop_name]] <- confidence
-        
-        # If this population is a better match than previous ones
+      if (total_weight > 0) {
+        confidence <- score / total_weight
         if (confidence > best_score && confidence > min_confidence) {
           best_score <- confidence
           best_match <- pop_name
-          best_details <- paste(matching_details, collapse = ", ")
+          best_details <- paste(match_details, collapse = ", ")
         }
       }
     }
     
     # Assign the best matching population
     results$Population[i] <- best_match
-    results$Confidence[i] <- best_score * 100  # Convert to percentage
+    results$Confidence[i] <- round(best_score * 100, 1)
     results$MatchDetails[i] <- best_details
   }
   

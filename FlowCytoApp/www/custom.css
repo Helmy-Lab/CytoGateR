@@ -25,9 +25,21 @@ h5 { font-size: 20px !important; }
 }
 
 /* Improve readability of all plot text */
-.plotly text, .ggplot text, .plot text {
+.plotly text, .ggplot text, .plot text, .gtitle, .xtitle, .ytitle, .annotation-text {
   font-family: 'Arial', sans-serif !important;
-  font-size: 16px !important;
+}
+
+/* Force font size on plotly elements */
+.plotly .gtitle, .plotly .xtitle, .plotly .ytitle, 
+.plotly .trace .legendtext,
+.plotly .annotation-text, 
+.plotly .annotation {
+  /* REMOVE font-size: inherit !important; */
+}
+
+/* Fix for legend text */
+.legend text, .legendtext {
+  /* REMOVE font-size: inherit !important; */
 }
 
 /* Additional spacing for UI elements to accommodate larger text */
@@ -118,7 +130,7 @@ h4 {
   border-radius: 5px;
   padding: 5px;
   background-color: white;
-  margin-bottom: 25px; /* Add bottom margin to all plots */
+  margin-bottom: 120px !important; /* INCREASED from 50px to 120px for all plots */
   position: relative; /* Ensure proper stacking context */
 }
 
@@ -148,9 +160,10 @@ h4 {
 
 /* Add proper spacing between plots and controls */
 .plot-container-wrapper {
-  margin-bottom: 60px;
+  margin-bottom: 150px !important; /* INCREASED from 100px to 150px */
   position: relative;
   clear: both;
+  overflow: visible;
 }
 
 /* Ensure controls are properly positioned and don't overlap plots */
@@ -158,23 +171,25 @@ h4 {
   padding: 15px;
   background-color: #f8f9fa;
   border-radius: 5px;
-  margin-top: 30px;
+  margin-top: 80px !important; /* INCREASED from 50px to 80px */
   margin-bottom: 30px;
   border: 1px solid #e9ecef;
   clear: both;
+  position: relative;
+  z-index: 200 !important; /* Ensure buttons are above plots and increased priority */
 }
 
 /* Fix plot positioning */
 .shiny-plot-output, .plotly-graph-div {
   overflow: visible !important;
-  margin-bottom: 30px !important; 
+  margin-bottom: 120px !important; /* INCREASED from 50px to 120px */
   z-index: 1;
 }
 
 /* Ensure buttons have proper z-index and don't get hidden */
 .btn {
   position: relative;
-  z-index: 10;
+  z-index: 100 !important; /* Increased from 10 */
 }
 
 /* Add clearfix to prevent layout issues */
@@ -184,13 +199,145 @@ h4 {
   clear: both;
 }
 
+/* Better styling for cluster management buttons */
+.btn-info, .btn-warning {
+  padding: 6px 12px !important;
+  font-size: 14px !important;
+  border-radius: 4px !important;
+  margin-right: 5px !important;
+}
+
 /* Add spacing after horizontal rules */
 hr {
-  margin-top: 30px;
-  margin-bottom: 30px;
+  margin-top: 60px !important; /* INCREASED from 40px to 60px */
+  margin-bottom: 60px !important; /* INCREASED from 40px to 60px */
+  clear: both;
 }
 
 /* Better control placement for checkboxes in button rows */
 .checkbox-inline {
   padding-top: 8px;
+}
+
+/* Fix for Merge Similar Clusters button */
+.btn-primary {
+  margin-bottom: 15px !important;
+  position: relative;
+  z-index: 1000 !important;
+}
+
+/* Ensure plots don't overflow their containers */
+.tab-content {
+  overflow: visible !important;
+  padding-bottom: 100px !important; /* INCREASED from 60px to 100px */
+}
+
+/* Add additional spacing for plotly plots specifically */
+.js-plotly-plot {
+  margin-bottom: 150px !important; /* INCREASED from 70px to 150px */
+}
+
+/* Fix for t-SNE and UMAP plots */
+.plotly-html-widget {
+  margin-bottom: 150px !important; /* INCREASED from 80px to 150px */
+}
+
+/* Additional fixes for t-SNE and Cluster tabs with buttons at bottom */
+.shiny-tab-content {
+  padding-bottom: 120px !important;
+}
+
+/* Specific spacing for tab panels with merge buttons */
+#raw_data-cluster_analysis, #batch_analysis-cluster_management {
+  margin-bottom: 200px !important;
+  padding-bottom: 200px !important;
+}
+
+/* Create space between buttons and plot in Cluster tab */
+#raw_data-clusterPlot, #batch_analysis-sampleClusterPlot {
+  margin-bottom: 200px !important;
+}
+
+/* Adjust plot font sizes on all plotly elements */
+.g-gtitle, .plotly .gtitle, .plotly .xtitle, .plotly .ytitle {
+  /* Use CSS variables for dynamic sizing */
+  font-size: var(--plotly-title-size, 22px) !important;
+}
+
+/* SVG text elements in plots */
+.main-svg text {
+  /* Just set the font family */
+  font-family: 'Arial', sans-serif !important;
+}
+
+/* Size fixes for plotly axis labels */
+.xtick text, .ytick text {
+  font-size: var(--plotly-font-size, 16px) !important;
+}
+
+/* Make sure plotly interactive elements are on top */
+.plotly .hoverlayer {
+  z-index: 1000 !important;
+}
+
+/* Add top margin to the action buttons that follow plots */
+.action-button {
+  margin-top: 10px;
+}
+
+/* Move buttons below plots */
+#raw_data-showMergeModal, #raw_data-resetMerging,
+#batch_analysis-showMergeModal, #batch_analysis-resetMerging {
+  margin-top: 50px !important;
+  position: relative;
+  z-index: 1000 !important;
+}
+
+/* Specific spacing for batch visualization to prevent collision */
+#batch_analysis-sampleClusterPlot, #batch_analysis-sampleHeatmap {
+  margin-bottom: 200px !important; /* Extra space for cluster management */
+}
+
+/* Ensure plotly fonts aren't overridden by browser styles */
+.js-plotly-plot .plotly .gtitle,
+.js-plotly-plot .plotly .xtitle,
+.js-plotly-plot .plotly .ytitle {
+  font-weight: bold !important;
+}
+
+/* Ensure axis labels use the correct font size */
+.js-plotly-plot .plotly .xtick text,
+.js-plotly-plot .plotly .ytick text {
+  /* Don't set font-size here - let plotly manage it */
+  font-family: 'Arial', sans-serif !important;
+}
+
+/* Legend styling */
+.js-plotly-plot .plotly .legend .scrollbox {
+  /* Don't set font-size here - let plotly manage it */
+  font-family: 'Arial', sans-serif !important;
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* Fix for plot container spacing */
+.plot-container-wrapper {
+  position: relative;
+  margin-bottom: 120px;
+  overflow: visible;
+}
+
+/* Specific spacing for cluster visualizations */
+.control-panel {
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  margin-top: 80px;
+  margin-bottom: 40px;
+  padding: 15px;
+  position: relative;
+  z-index: 100;
+}
+
+/* Make sure plotly doesn't have any font size overrides */
+.js-plotly-plot * {
+  /* REMOVE font-size: unset; */
 }

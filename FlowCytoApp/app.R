@@ -5,52 +5,48 @@
 source("global.R")
 
 # Define UI
-ui <- fluidPage(
+ui <- navbarPage(
+  # Add theme and include custom CSS
   theme = shinytheme("flatly"),
+  includeCSS("www/custom.css"),
+  includeScript("www/custom.js"), # Add the custom JavaScript
+  
+  # Add a custom CSS style tag to override font-size controls
   tags$head(
-    tags$script("$(document).on('shiny:connected', function() { 
-      Shiny.setInputValue('showBatchClustering', true);
-      Shiny.setInputValue('showBatchPreprocessing', false);
-      Shiny.setInputValue('showBatchAdvancedCluster', false);
-    });"),
-    tags$script("
-      Shiny.addCustomMessageHandler('refreshClusterPlot', function(message) {
-        if (Shiny.shinyapp.$bindings.clusterPlot) {
-          Shiny.shinyapp.$bindings.clusterPlot.forceUpdate();
-        }
-        if (Shiny.shinyapp.$bindings['raw_data-clusterPlot']) {
-          Shiny.shinyapp.$bindings['raw_data-clusterPlot'].forceUpdate();
-        }
-        if (Shiny.shinyapp.$bindings['batch_analysis-sampleClusterPlot']) {
-          Shiny.shinyapp.$bindings['batch_analysis-sampleClusterPlot'].forceUpdate();
-        }
-        if (Shiny.shinyapp.$bindings['batch_analysis-controlSamplePlot']) {
-          Shiny.shinyapp.$bindings['batch_analysis-controlSamplePlot'].forceUpdate();
-        }
-        if (Shiny.shinyapp.$bindings['batch_analysis-treatedSamplePlot']) {
-          Shiny.shinyapp.$bindings['batch_analysis-treatedSamplePlot'].forceUpdate();
-        }
-      });
-    "),
-    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")
+    tags$style(HTML("
+      /* Ensure plotly respects its internal font settings */
+      .js-plotly-plot .plotly text {
+        font-family: 'Arial', sans-serif !important;
+      }
+      
+      /* Fix spacing for plot containers */
+      .plot-container-wrapper {
+        margin-bottom: 120px !important;
+      }
+    "))
   ),
   
-  titlePanel("Flow Cytometry Analysis Tool"),
+  # Application title
+  title = "Flow Cytometry Analysis Tool",
   
-  # Application tabs
-  tabsetPanel(
-    id = "main_tabs",
-    # Settings Module
-    tabPanel("Application Settings", settingsModuleUI("settings")),
-    
-    # Raw Data Analysis Module
-    tabPanel("Raw Data Analysis", rawDataModuleUI("raw_data")),
-    
-    # Processed Data Analysis Module
-    tabPanel("Processed Data Analysis", processedDataModuleUI("processed_data")),
-    
-    # Batch Analysis Module
-    tabPanel("Batch Analysis", batchAnalysisModuleUI("batch_analysis"))
+  # Tab for the Settings Module
+  tabPanel("Settings", 
+           settingsModuleUI("settings")
+  ),
+  
+  # Tab for the Raw Data Module
+  tabPanel("Raw Data", 
+           rawDataModuleUI("raw_data")
+  ),
+  
+  # Tab for the Processed Data Module
+  tabPanel("Processed Data", 
+           processedDataModuleUI("processed_data")
+  ),
+  
+  # Tab for the Batch Analysis Module
+  tabPanel("Batch Analysis", 
+           batchAnalysisModuleUI("batch_analysis")
   )
 )
 
@@ -61,7 +57,7 @@ server <- function(input, output, session) {
     # Global plot settings controlled by the settings module
     plot_settings = list(
       width = 800,
-      height = 500,
+      height = 600,
       font_size = 18,
       point_size = 10,
       color_palette = "viridis"
@@ -77,6 +73,47 @@ server <- function(input, output, session) {
   processed_data_results <- processedDataModuleServer("processed_data", app_state = app_state)
   
   batch_analysis_results <- batchAnalysisModuleServer("batch_analysis", app_state = app_state)
+  
+  # Create an observer to trigger plot refreshes when settings change
+  observe({
+    # This will re-execute whenever any plot setting changes
+    font_size <- app_state$plot_settings$font_size
+    
+    # Update CSS variable for plotly fonts if possible
+    session$sendCustomMessage(type = "updatePlotlyFonts", message = list(
+      fontSize = font_size
+    ))
+    
+    # Delay execution slightly to allow for other reactives to update
+    invalidateLater(300)
+    
+    # Explicitly target main plots by ID with font size
+    session$sendCustomMessage(type = "plotly-replot", message = list(
+      id = "raw_data-tsnePlot", 
+      fontSize = font_size
+    ))
+    session$sendCustomMessage(type = "plotly-replot", message = list(
+      id = "raw_data-umapPlot",
+      fontSize = font_size
+    ))
+    session$sendCustomMessage(type = "plotly-replot", message = list(
+      id = "raw_data-clusterPlot",
+      fontSize = font_size
+    ))
+    session$sendCustomMessage(type = "plotly-replot", message = list(
+      id = "batch_analysis-sampleDimensionalityPlot",
+      fontSize = font_size
+    ))
+    session$sendCustomMessage(type = "plotly-replot", message = list(
+      id = "batch_analysis-sampleClusterPlot",
+      fontSize = font_size
+    ))
+  })
+  
+  # Add JavaScript to ensure font settings are applied to plotly charts
+  session$onSessionEnded(function() {
+    # Clean up any resources when session ends
+  })
 }
 
 # Run the app

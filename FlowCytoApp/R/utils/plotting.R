@@ -50,16 +50,20 @@ createDimReductionPlot <- function(plot_data, dim1, dim2, colorBy = NULL,
       labs(title = title, x = xlab, y = ylab)
   }
   
-  # Apply standard theme
+  # Apply enhanced theme with better font control
   p <- p + theme_minimal(base_size = font_size) +
     theme(
-      plot.title = element_text(face = "bold", hjust = 0.5),
-      plot.subtitle = element_text(hjust = 0.5),
-      axis.title = element_text(face = "bold"),
-      legend.title = element_text(face = "bold"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = font_size * 1.2),
+      plot.subtitle = element_text(hjust = 0.5, size = font_size * 1.0),
+      axis.title = element_text(face = "bold", size = font_size * 1.1),
+      axis.text = element_text(size = font_size),
+      legend.title = element_text(face = "bold", size = font_size * 1.1),
+      legend.text = element_text(size = font_size),
       panel.grid.minor = element_blank(),
       panel.border = element_rect(color = "grey80", fill = NA)
-    )
+    ) +
+    # Add fixed coordinate ratio to ensure proper aspect ratio
+    coord_fixed(ratio = 1)
   
   return(p)
 }
@@ -398,4 +402,37 @@ createMarkerExpressionPlot <- function(plot_data, marker, color_palette = "virid
   }
   
   return(p)
+}
+
+# Function to get a standardized theme with explicit font size handling
+get_standard_theme <- function(font_size = 12) {
+  theme_minimal(base_size = font_size) +
+    theme(
+      # Use !important to override any CSS from the browser
+      plot.title = element_text(face = "bold", hjust = 0.5, size = font_size * 1.2),
+      plot.subtitle = element_text(hjust = 0.5, size = font_size * 1.0),
+      axis.title = element_text(face = "bold", size = font_size * 1.1),
+      axis.text = element_text(size = font_size),
+      legend.title = element_text(face = "bold", size = font_size * 1.1),
+      legend.text = element_text(size = font_size),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "grey80", fill = NA),
+      # Ensure good spacing
+      plot.margin = margin(t = 20, r = 20, b = 30, l = 20, unit = "pt")
+    )
+}
+
+# Function to get the appropriate color scale based on palette name
+get_color_palette <- function(palette_name) {
+  switch(palette_name,
+         "viridis" = scale_color_viridis_d(),
+         "plasma" = scale_color_viridis_d(option = "plasma"),
+         "magma" = scale_color_viridis_d(option = "magma"),
+         "inferno" = scale_color_viridis_d(option = "inferno"),
+         "blues" = scale_color_brewer(palette = "Blues"),
+         "reds" = scale_color_brewer(palette = "Reds"),
+         "brewer_paired" = scale_color_brewer(palette = "Paired"),
+         "brewer_brbg" = scale_color_brewer(palette = "BrBG"),
+         scale_color_viridis_d() # Default to viridis
+  )
 }

@@ -838,8 +838,34 @@ rawDataModuleServer <- function(id, app_state) {
       return(metrics_ui)
     })
     
+    # Make clusterPlot reactive to palette changes
+    observe({
+      # This observer will re-run whenever plot settings change
+      app_state$plot_settings
+      
+      # Force the clusterPlot to invalidate and re-render
+      session$sendCustomMessage(type = "refreshClusterPlot", message = list())
+    })
+    
+    # NEW: Make t-SNE and UMAP plots reactive to plot settings changes
+    observe({
+      # This observer will re-run whenever plot settings change
+      app_state$plot_settings
+      
+      # Force all plotly outputs to redraw with new settings
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("tsnePlot")))
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("umapPlot")))
+    })
+    
     # Render t-SNE plot
     output$tsnePlot <- renderPlotly({
+      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
       req(processedData(), "t-SNE" %in% input$methods)
       plot_data <- processedData()$plot_data
       req("tsne1" %in% colnames(plot_data))
@@ -862,26 +888,102 @@ rawDataModuleServer <- function(id, app_state) {
         dim1 = "tsne1",
         dim2 = "tsne2",
         colorBy = color_by,
-        color_palette = app_state$plot_settings$color_palette,
-        point_size = app_state$plot_settings$point_size,
-        font_size = app_state$plot_settings$font_size,
+        color_palette = color_palette,
+        point_size = point_size,
+        font_size = font_size,
         title = "t-SNE Projection",
         xlab = "t-SNE 1",
         ylab = "t-SNE 2"
       )
       
-      # Convert to plotly
-      ggplotly(p, width = app_state$plot_settings$width, height = app_state$plot_settings$height) %>%
-        layout(
-          hoverlabel = list(
-            bgcolor = "white",
-            font = list(family = "Arial", size = app_state$plot_settings$font_size)
+      # Convert to plotly with explicit font settings
+      p_plotly <- ggplotly(p, width = width, height = height)
+      
+      # Apply completely explicit font settings to ensure they're properly applied
+      p_plotly <- p_plotly %>% layout(
+        font = list(
+          family = "Arial",
+          size = font_size,
+          color = "black"
+        ),
+        title = list(
+          text = "t-SNE Projection",
+          font = list(
+            family = "Arial",
+            size = font_size * 1.2,
+            color = "black"
           )
-        )
+        ),
+        xaxis = list(
+          title = list(
+            text = "t-SNE 1",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          ),
+          scaleanchor = "y",
+          scaleratio = 1
+        ),
+        yaxis = list(
+          title = list(
+            text = "t-SNE 2",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          )
+        ),
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9
+          )
+        ),
+        # Add legend settings if clusters are shown
+        legend = if (!is.null(color_by)) list(
+          title = list(
+            text = "Cluster",
+            font = list(
+              family = "Arial",
+              size = font_size,
+              color = "black"
+            )
+          ),
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9,
+            color = "black"
+          ),
+          bgcolor = "rgba(255, 255, 255, 0.9)",
+          bordercolor = "rgba(0, 0, 0, 0.2)",
+          borderwidth = 1
+        ) else list()
+      )
+      
+      return(p_plotly)
     })
     
     # Render UMAP plot
     output$umapPlot <- renderPlotly({
+      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
       req(processedData(), "UMAP" %in% input$methods)
       plot_data <- processedData()$plot_data
       req("umap1" %in% colnames(plot_data))
@@ -904,35 +1006,102 @@ rawDataModuleServer <- function(id, app_state) {
         dim1 = "umap1",
         dim2 = "umap2",
         colorBy = color_by,
-        color_palette = app_state$plot_settings$color_palette,
-        point_size = app_state$plot_settings$point_size,
-        font_size = app_state$plot_settings$font_size,
+        color_palette = color_palette,
+        point_size = point_size,
+        font_size = font_size,
         title = "UMAP Projection",
         xlab = "UMAP 1",
         ylab = "UMAP 2"
       )
       
-      # Convert to plotly
-      ggplotly(p, width = app_state$plot_settings$width, height = app_state$plot_settings$height) %>%
-        layout(
-          hoverlabel = list(
-            bgcolor = "white",
-            font = list(family = "Arial", size = app_state$plot_settings$font_size)
+      # Convert to plotly with explicit font settings
+      p_plotly <- ggplotly(p, width = width, height = height)
+      
+      # Apply completely explicit font settings to ensure they're properly applied
+      p_plotly <- p_plotly %>% layout(
+        font = list(
+          family = "Arial",
+          size = font_size,
+          color = "black"
+        ),
+        title = list(
+          text = "UMAP Projection",
+          font = list(
+            family = "Arial",
+            size = font_size * 1.2,
+            color = "black"
           )
-        )
+        ),
+        xaxis = list(
+          title = list(
+            text = "UMAP 1",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          ),
+          scaleanchor = "y",
+          scaleratio = 1
+        ),
+        yaxis = list(
+          title = list(
+            text = "UMAP 2",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          )
+        ),
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9
+          )
+        ),
+        # Add legend settings if clusters are shown
+        legend = if (!is.null(color_by)) list(
+          title = list(
+            text = "Cluster",
+            font = list(
+              family = "Arial",
+              size = font_size,
+              color = "black"
+            )
+          ),
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9,
+            color = "black"
+          ),
+          bgcolor = "rgba(255, 255, 255, 0.9)",
+          bordercolor = "rgba(0, 0, 0, 0.2)",
+          borderwidth = 1
+        ) else list()
+      )
+      
+      return(p_plotly)
     })
     
     # Cluster visualization in dedicated tab
-    # Make clusterPlot reactive to palette changes
-    observe({
-      # This observer will re-run whenever plot settings change
-      app_state$plot_settings
-      
-      # Force the clusterPlot to invalidate and re-render
-      session$sendCustomMessage(type = "refreshClusterPlot", message = list())
-    })
-    
     output$clusterPlot <- renderPlotly({
+      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
       req(processedData())
       
       # Check if we have clustering results (either original or merged)
@@ -993,15 +1162,15 @@ rawDataModuleServer <- function(id, app_state) {
       
       # Create a base ggplot with correct color palette
       p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], color = .data[[color_by]])) +
-        geom_point(alpha = 0.7, size = app_state$plot_settings$point_size/2) +
-        get_color_palette(app_state$plot_settings$color_palette) +
+        geom_point(alpha = 0.7, size = point_size/2) +
+        get_color_palette(color_palette) +
         labs(
           title = paste("Clusters from", cluster_data$method),
           x = dim_labels[1],
           y = dim_labels[2],
           color = if(color_by == "Population") "Cell Population" else "Cluster"
         ) +
-        get_standard_theme(app_state$plot_settings$font_size)
+        get_standard_theme(font_size)
       
       # Convert to plotly
       p_plotly <- ggplotly(p, tooltip = c("color", "x", "y")) %>%
@@ -1010,12 +1179,12 @@ rawDataModuleServer <- function(id, app_state) {
             title = list(
               text = if(color_by == "Population") "Cell Population" else "Cluster",
               font = list(
-                size = app_state$plot_settings$font_size,
+                size = font_size,
                 family = "Arial"
               )
             ),
             font = list(
-              size = app_state$plot_settings$font_size * 0.9,
+              size = font_size * 0.9,
               family = "Arial"
             ),
             bgcolor = "rgba(255, 255, 255, 0.9)",
@@ -1026,11 +1195,11 @@ rawDataModuleServer <- function(id, app_state) {
             bgcolor = "white",
             font = list(
               family = "Arial",
-              size = app_state$plot_settings$font_size * 0.9
+              size = font_size * 0.9
             )
           ),
-          width = app_state$plot_settings$width,
-          height = app_state$plot_settings$height
+          width = width,
+          height = height
         )
       
       # Add cluster labels if showing population names and user has enabled labels
@@ -1059,7 +1228,7 @@ rawDataModuleServer <- function(id, app_state) {
             bgcolor = "rgba(255, 255, 255, 0.8)",
             bordercolor = "rgba(0, 0, 0, 0.5)",
             borderwidth = 1,
-            font = list(size = app_state$plot_settings$font_size)
+            font = list(size = font_size)
           )
         }
       }
@@ -1121,7 +1290,7 @@ rawDataModuleServer <- function(id, app_state) {
         centers = centers,
         method = method,
         title = "Cluster Intensity Profiles",
-        font_size = app_state$plot_settings$font_size,
+        font_size = font_size,
         population_data = population_data
       )
     }, width = function() app_state$plot_settings$width,

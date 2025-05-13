@@ -128,8 +128,13 @@ settingsModuleServer <- function(id, app_state) {
         color_palette = input$global_color_palette
       )
       
-      # Force a refresh of all plots
-      session$sendCustomMessage(type = "refreshClusterPlot", message = list())
+      # Use a safer approach to handle plot refreshes
+      session$sendCustomMessage(type = "refreshPlots", message = list())
+      
+      # Use the safer relayout method instead of purge
+      session$sendCustomMessage(type = "updatePlotlyFonts", message = list(
+        fontSize = input$global_font_size
+      ))
       
       showNotification("Plot settings applied to all visualizations", type = "message")
     })
