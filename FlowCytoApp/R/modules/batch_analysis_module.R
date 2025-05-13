@@ -131,6 +131,25 @@ batchAnalysisModuleUI <- function(id) {
                       min = -2, max = 0, value = -0.5, step = 0.1),
           sliderInput(ns("batchMinConfidenceThreshold"), "Minimum Confidence Threshold (%)",
                       min = 0, max = 100, value = 30, step = 5)
+        ),
+        
+        # Add cluster visualization controls section
+        hr(),
+        h5("Cluster Visualization Controls"),
+        
+        # Show cluster labels checkbox (moved from main panel)
+        div(
+          style = "margin-bottom: 15px;",
+          checkboxInput(ns("showClusterLabels"), "Show Population Labels", value = TRUE)
+        ),
+        
+        # Cluster management buttons (moved from main panel)
+        div(
+          style = "display: flex; flex-direction: column; gap: 10px;",
+          actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
+                    class = "btn-info", icon = icon("object-group"), width = "100%"),
+          actionButton(ns("resetMerging"), "Reset to Original Clusters", 
+                    class = "btn-warning", icon = icon("undo"), width = "100%")
         )
       ),
       
@@ -162,6 +181,7 @@ batchAnalysisModuleUI <- function(id) {
                  hr(),
                  div(
                    class = "plot-container-wrapper",
+                   style = "margin-bottom: 250px; position: relative; overflow: visible; padding-bottom: 50px;", # Much larger margin
                    fluidRow(
                      column(12, 
                             h4("Dimensionality Reduction Plot", align = "center"),
@@ -171,54 +191,35 @@ batchAnalysisModuleUI <- function(id) {
                  conditionalPanel(
                    condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
                    hr(),
-                   # Increased margin-bottom to create more space between plot and controls
+                   # Drastically increase margin for clustering visualization
                    div(
                      class = "plot-container-wrapper",
-                     style = "margin-bottom: 120px; position: relative; overflow: visible;",
+                     style = "margin-bottom: 300px; position: relative; overflow: visible; padding-bottom: 50px;", # Very large margin
                      fluidRow(
                        column(12, h4("Clustering Visualization", align = "center")),
-                       column(6, shinycssloaders::withSpinner(plotlyOutput(ns("sampleClusterPlot"), height = "500px"))),
-                       column(6, shinycssloaders::withSpinner(plotOutput(ns("sampleHeatmap"), height = "500px")))
-                     )
-                   ),
-                   # Added a well panel with increased vertical spacing
-                   div(
-                     class = "control-panel",
-                     style = "background-color: #f8f9fa; border-radius: 5px; margin-top: 80px; margin-bottom: 40px; padding: 15px; position: relative; z-index: 100;",
-                     fluidRow(
-                       column(12, h4("Cluster Management", align = "center", style = "margin-top: 0px; margin-bottom: 15px;")),
-                       column(12, 
-                         div(
-                           style = "display: flex; justify-content: center; gap: 10px;",
-                           actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
-                                     class = "btn-info", icon = icon("object-group"), 
-                                     style = "width: auto; font-size: 14px;"),
-                           actionButton(ns("resetMerging"), "Reset to Original Clusters", 
-                                     class = "btn-warning", icon = icon("undo"), 
-                                     style = "width: auto; font-size: 14px;"),
-                           div(style = "margin-left: 10px; padding-top: 5px;", 
-                              checkboxInput(ns("showClusterLabels"), "Show Population Labels", value = TRUE))
-                         )
-                       )
+                       column(6, shinycssloaders::withSpinner(plotlyOutput(ns("sampleClusterPlot"), height = "550px"))),
+                       column(6, shinycssloaders::withSpinner(plotOutput(ns("sampleHeatmap"), height = "550px")))
                      )
                    ),
                    hr(),
+                   # Increase spacing for cluster statistics section
                    div(
                      class = "plot-container-wrapper",
+                     style = "margin-bottom: 200px; position: relative; overflow: visible; padding-bottom: 50px;", # Large margin
                      fluidRow(
                        column(12, h4("Cluster Statistics", align = "center")),
                        column(12, shinycssloaders::withSpinner(DT::dataTableOutput(ns("sampleClusterStats"))))
                      )
                    ),
                    hr(),
-                   # Added extra spacing and container for marker expression section
+                   # Add much more spacing for marker expression section
                    div(
                      class = "plot-container-wrapper",
-                     style = "margin-top: 30px;",
+                     style = "margin-top: 30px; margin-bottom: 250px; position: relative; overflow: visible; padding-bottom: 80px;", # Very large margin
                      fluidRow(
                        column(12, h4("Marker Expression by Cluster", align = "center")),
                        column(4, selectInput(ns("sampleMarkerSelect"), "Select Marker:", choices = NULL)),
-                       column(8, shinycssloaders::withSpinner(plotlyOutput(ns("markerExpressionByCluster"), height = "500px")))
+                       column(8, shinycssloaders::withSpinner(plotlyOutput(ns("markerExpressionByCluster"), height = "550px")))
                      )
                    )
                  )
@@ -231,10 +232,10 @@ batchAnalysisModuleUI <- function(id) {
                    column(6, selectInput(ns("compareViewTreated"), "Treated Sample:", choices = NULL))
                  ),
                  hr(),
-                 # Added container with spacing for the dimensionality reduction comparison plots
+                 # Drastically increase spacing for Control vs Treated dimensionality reduction plots
                  div(
                    class = "plot-container-wrapper",
-                   style = "margin-top: 20px; margin-bottom: 30px;",
+                   style = "margin-top: 20px; margin-bottom: 300px; position: relative; overflow: visible; padding-bottom: 50px;", # Much larger margin
                    fluidRow(
                      column(12, h4("Dimensionality Reduction Comparison", align = "center")),
                      column(6, shinycssloaders::withSpinner(plotlyOutput(ns("controlSamplePlot"), height = "600px"))),
@@ -254,23 +255,23 @@ batchAnalysisModuleUI <- function(id) {
                    # Added container with spacing for the cluster mapping heatmap
                    div(
                      class = "plot-container-wrapper",
-                     style = "margin-bottom: 30px;",
+                     style = "margin-bottom: 250px; position: relative; overflow: visible; padding-bottom: 80px;", # Much larger margin
                      fluidRow(
                        column(12, 
                               h4("Cluster Mapping", align = "center"),
                               p("Visualize how clusters from Control and Treated samples relate to each other based on marker expression similarity"),
-                              shinycssloaders::withSpinner(plotOutput(ns("clusterMappingHeatmap"), height = "600px")))
+                              shinycssloaders::withSpinner(plotOutput(ns("clusterMappingHeatmap"), height = "650px")))
                      )
                    ),
 
                    hr(),
-                   # Added container with spacing for the signature markers heatmap
+                   # Add much larger margins for signature markers heatmap
                    div(
                      class = "plot-container-wrapper",
-                     style = "margin-top: 30px; margin-bottom: 30px;",
+                     style = "margin-top: 30px; margin-bottom: 300px; position: relative; overflow: visible; padding-bottom: 80px;", # Much larger margin
                      fluidRow(
                        column(12, h4("Signature Markers by Cluster", align = "center")),
-                       column(12, shinycssloaders::withSpinner(plotOutput(ns("signatureMarkerHeatmap"), height = "600px")))
+                       column(12, shinycssloaders::withSpinner(plotOutput(ns("signatureMarkerHeatmap"), height = "650px")))
                      )
                    )
                  ),
@@ -966,7 +967,12 @@ batchAnalysisModuleServer <- function(id, app_state) {
             ),
             bgcolor = "rgba(255, 255, 255, 0.9)",
             bordercolor = "rgba(0, 0, 0, 0.2)",
-            borderwidth = 1
+            borderwidth = 1,
+            x = 0.5,
+            xanchor = "center",
+            y = -0.15,
+            yanchor = "top",
+            orientation = "h"
           ),
           hoverlabel = list(
             bgcolor = "white",
@@ -1213,7 +1219,12 @@ batchAnalysisModuleServer <- function(id, app_state) {
           ),
           bgcolor = "rgba(255, 255, 255, 0.9)",
           bordercolor = "rgba(0, 0, 0, 0.2)",
-          borderwidth = 1
+          borderwidth = 1,
+          x = 0.5,
+          xanchor = "center",
+          y = -0.15,
+          yanchor = "top",
+          orientation = "h"
         ),
         hoverlabel = list(
           bgcolor = "white",
@@ -1567,10 +1578,11 @@ batchAnalysisModuleServer <- function(id, app_state) {
             bgcolor = "rgba(255, 255, 255, 0.9)",
             bordercolor = "rgba(0, 0, 0, 0.2)",
             borderwidth = 1,
-            x = 0,
-            xanchor = "left",
-            y = 1,
-            yanchor = "top"
+            x = 0.5,
+            xanchor = "center",
+            y = -0.15,
+            yanchor = "top",
+            orientation = "h"
           ),
           hoverlabel = list(
             bgcolor = "white",
@@ -1760,10 +1772,11 @@ batchAnalysisModuleServer <- function(id, app_state) {
             bgcolor = "rgba(255, 255, 255, 0.9)",
             bordercolor = "rgba(0, 0, 0, 0.2)",
             borderwidth = 1,
-            x = 0,
-            xanchor = "left",
-            y = 1,
-            yanchor = "top"
+            x = 0.5,
+            xanchor = "center",
+            y = -0.15,
+            yanchor = "top",
+            orientation = "h"
           ),
           hoverlabel = list(
             bgcolor = "white",

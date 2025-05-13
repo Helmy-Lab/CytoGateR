@@ -64,7 +64,29 @@ clusteringModuleUI <- function(id) {
       
       # Run clustering button
       br(),
-      actionButton(ns("runClustering"), "Run Clustering", class = "btn-success")
+      actionButton(ns("runClustering"), "Run Clustering", class = "btn-success"),
+      
+      # Add cluster visualization controls section
+      conditionalPanel(
+        condition = paste0("input['", ns("showClusteringOptions"), "'] === true"),
+        hr(),
+        h5("Cluster Visualization Controls"),
+        
+        # Show cluster labels checkbox (moved from main panel)
+        div(
+          style = "margin-bottom: 15px;",
+          checkboxInput(ns("showClusterLabels"), "Show Cluster Labels", value = FALSE)
+        ),
+        
+        # Cluster management buttons (moved from main panel)
+        div(
+          style = "display: flex; flex-direction: column; gap: 10px;",
+          actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
+                      class = "btn-info", icon = icon("object-group"), width = "100%"),
+          actionButton(ns("resetMerging"), "Reset to Original Clusters", 
+                      class = "btn-warning", icon = icon("undo"), width = "100%")
+        )
+      )
     )
   )
 }
@@ -180,7 +202,8 @@ clusteringModuleServer <- function(id, input_data, app_state) {
       clustering_results = clustering_results,
       populations = populations,
       showClusteringOptions = reactive(input$showClusteringOptions),
-      showPopulationLabels = reactive(input$showPopulationLabels)
+      showPopulationLabels = reactive(input$showPopulationLabels),
+      showClusterLabels = reactive(input$showClusterLabels)
     ))
   })
 }

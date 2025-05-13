@@ -11,17 +11,19 @@ ui <- navbarPage(
   includeCSS("www/custom.css"),
   includeScript("www/custom.js"), # Add the custom JavaScript
   
-  # Add a custom CSS style tag to override font-size controls
+  # Add a custom CSS style tag to set initial font sizes
   tags$head(
     tags$style(HTML("
-      /* Ensure plotly respects its internal font settings */
-      .js-plotly-plot .plotly text {
-        font-family: 'Arial', sans-serif !important;
+      /* Initial font size variables */
+      :root {
+        --plotly-font-size: 16px;
+        --plotly-title-size: 19px;
+        --plotly-axis-size: 17px;
       }
       
-      /* Fix spacing for plot containers */
-      .plot-container-wrapper {
-        margin-bottom: 120px !important;
+      /* Plotly optimizations */
+      .js-plotly-plot .plotly text {
+        font-family: 'Arial', sans-serif;
       }
     "))
   ),
@@ -52,67 +54,51 @@ ui <- navbarPage(
 
 # Define server
 server <- function(input, output, session) {
-  # Initialize reactive values for global application state
+  # App state - shared between modules
   app_state <- reactiveValues(
-    # Global plot settings controlled by the settings module
     plot_settings = list(
       width = 800,
       height = 600,
-      font_size = 18,
-      point_size = 10,
+      font_size = 16,
+      point_size = 6,
       color_palette = "viridis"
     )
   )
   
   # Call module servers
-  settings_results <- settingsModuleServer("settings", app_state = app_state)
+  raw_data_results <- rawDataModuleServer("raw_data", app_state)
+  batch_results <- batchAnalysisModuleServer("batch_analysis", app_state)
+  settings_results <- settingsModuleServer("settings", app_state)
   
-  # Pass app_state to all modules that need access to global settings
-  raw_data_results <- rawDataModuleServer("raw_data", app_state = app_state)
-  
-  processed_data_results <- processedDataModuleServer("processed_data", app_state = app_state)
-  
-  batch_analysis_results <- batchAnalysisModuleServer("batch_analysis", app_state = app_state)
-  
-  # Create an observer to trigger plot refreshes when settings change
+  # Efficient observer to ensure plots render properly after settings changes
   observe({
-    # This will re-execute whenever any plot setting changes
-    font_size <- app_state$plot_settings$font_size
+    # Force reactivity when plot settings change
+    settings <- app_state$plot_settings
     
-    # Update CSS variable for plotly fonts if possible
+    # Update CSS variables once (more efficient than individual DOM updates)
     session$sendCustomMessage(type = "updatePlotlyFonts", message = list(
-      fontSize = font_size
+      fontSize = settings$font_size
     ))
     
-    # Delay execution slightly to allow for other reactives to update
-    invalidateLater(300)
+    # Define critical plots that need faster updates
+    priorityPlots <- c(
+      "raw_data-clusterPlot",
+      "raw_data-tsnePlot",
+      "raw_data-umapPlot"
+    )
     
-    # Explicitly target main plots by ID with font size
-    session$sendCustomMessage(type = "plotly-replot", message = list(
-      id = "raw_data-tsnePlot", 
-      fontSize = font_size
-    ))
-    session$sendCustomMessage(type = "plotly-replot", message = list(
-      id = "raw_data-umapPlot",
-      fontSize = font_size
-    ))
-    session$sendCustomMessage(type = "plotly-replot", message = list(
-      id = "raw_data-clusterPlot",
-      fontSize = font_size
-    ))
-    session$sendCustomMessage(type = "plotly-replot", message = list(
-      id = "batch_analysis-sampleDimensionalityPlot",
-      fontSize = font_size
-    ))
-    session$sendCustomMessage(type = "plotly-replot", message = list(
-      id = "batch_analysis-sampleClusterPlot",
-      fontSize = font_size
-    ))
-  })
-  
-  # Add JavaScript to ensure font settings are applied to plotly charts
-  session$onSessionEnded(function() {
-    # Clean up any resources when session ends
+    # Only update essential plots immediately with batched parameters
+    for (id in priorityPlots) {
+      if (!is.null(id)) {
+        session$sendCustomMessage(type = "plotly-replot", message = list(
+          id = id,
+          fontSize = settings$font_size
+        ))
+      }
+    }
+    
+    # Trigger a general refresh for other plots
+    session$sendCustomMessage(type = "refreshPlots", message = list())
   })
 }
 

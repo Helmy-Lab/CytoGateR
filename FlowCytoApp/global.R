@@ -75,69 +75,57 @@ get_fill_palette <- function(palette_name) {
   )
 }
 
-# Function to create a standard ggplot theme
+# Performance-optimized ggplot theme
 get_standard_theme <- function(font_size = 12) {
+  # Start with minimal theme as it's simpler
   theme_minimal(base_size = font_size) +
     theme(
-      plot.title = element_text(face = "bold", hjust = 0.5, size = rel(1.2)),
-      plot.subtitle = element_text(hjust = 0.5, size = rel(1.0)),
-      axis.title = element_text(face = "bold", size = rel(1.1)),
-      axis.text = element_text(size = rel(1.0)),
-      legend.title = element_text(face = "bold", size = rel(1.1)),
-      legend.text = element_text(size = rel(1.0)),
-      legend.position = "right",
-      legend.background = element_rect(fill = "white", color = "gray90"),
-      legend.key = element_blank(),
+      # Essential styling only - reduces calculation burden
+      plot.title = element_text(face = "bold", hjust = 0.5, size = font_size * 1.2),
+      plot.subtitle = element_text(hjust = 0.5, size = font_size),
+      axis.title = element_text(face = "bold", size = font_size * 1.1),
+      axis.text = element_text(size = font_size),
+      
+      # Simplified legend styling
+      legend.title = element_text(face = "bold", size = font_size * 1.1),
+      legend.text = element_text(size = font_size),
+      legend.position = "bottom",
+      legend.box = "horizontal",
+      
+      # Simplified grid - less elements to render
       panel.grid.minor = element_blank(),
       panel.grid.major = element_line(color = "gray90"),
-      panel.border = element_rect(color = "grey80", fill = NA),
-      panel.background = element_rect(fill = "white", color = NA),
-      plot.margin = margin(20, 20, 80, 20) # Increased bottom margin from 30 to 80 to prevent button overlap
+      
+      # Important margin for larger plots - balanced for performance
+      plot.margin = margin(15, 15, 100, 15)
     )
 }
 
-# Function to create standard tooltips for plotly
+# Optimized tooltip for plotly
 create_standard_tooltip <- function(plot, height = 600, width = 800, font_size = 12) {
+  # Batch all layout changes in a single call for better performance
   plot %>% layout(
+    # Group related properties together 
+    font = list(
+      family = "Arial",
+      size = font_size,
+      color = "black"
+    ),
+    
+    # Hover settings
     hoverlabel = list(
       bgcolor = "white",
       font = list(family = "Arial", size = font_size)
     ),
-    margin = list(b = 100, l = 80, t = 100, r = 50), # Increased bottom margin from 80 to 100
+    
+    # Size settings
     height = height,
     width = width,
-    xaxis = list(
-      title = list(
-        font = list(
-          family = "Arial",
-          size = font_size * 1.1,
-          color = "black"
-        )
-      ),
-      tickfont = list(
-        family = "Arial",
-        size = font_size
-      )
-    ),
-    yaxis = list(
-      title = list(
-        font = list(
-          family = "Arial",
-          size = font_size * 1.1,
-          color = "black"
-        )
-      ),
-      tickfont = list(
-        family = "Arial",
-        size = font_size
-      )
-    ),
-    title = list(
-      font = list(
-        family = "Arial",
-        size = font_size * 1.2,
-        color = "black"
-      )
-    )
+    
+    # Margin - significantly increased bottom margin for more space
+    margin = list(b = 250, l = 70, t = 70, r = 40),
+  
+    # Critical for aspect ratio but allow setting to auto
+    autosize = TRUE
   )
 }

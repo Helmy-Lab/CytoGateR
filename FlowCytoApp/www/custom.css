@@ -1,119 +1,116 @@
-/* Custom CSS for Flow Cytometry Analysis Tool */
+/* Optimized CSS for Flow Cytometry Analysis Tool */
 
-/* Global font size increase for better readability */
-body, .container-fluid, .form-control, button, .btn, select, input, label, .dataTables_info, .dataTables_paginate {
-  font-size: 18px !important;
+/* Efficient font-size definition with inheritance */
+body {
+  font-size: 18px;
+  font-family: 'Arial', sans-serif;
 }
 
-/* Make table content more readable */
+/* Let most elements inherit from body */
+.container-fluid, .form-control, button, .btn, select, input, label, 
+.dataTables_info, .dataTables_paginate {
+  font-size: inherit;
+}
+
+/* Tables with consistent styling */
 .dataTable td, .dataTable th {
-  font-size: 17px !important;
-  padding: 10px 12px !important;
+  font-size: 17px;
+  padding: 8px 10px;
 }
 
-/* Increase heading font sizes */
-h1 { font-size: 32px !important; }
-h2 { font-size: 28px !important; }
-h3 { font-size: 24px !important; }
-h4 { font-size: 22px !important; }
-h5 { font-size: 20px !important; }
-
-/* Make tab text more prominent */
-.nav-tabs > li > a {
-  font-size: 18px !important;
+/* Consolidated heading styles */
+h1, h2, h3, h4, h5 {
   font-weight: 500;
+  margin-top: 15px;
+  margin-bottom: 10px;
 }
+h1 { font-size: 32px; }
+h2 { font-size: 28px; }
+h3 { font-size: 24px; }
+h4 { font-size: 22px; }
+h5 { font-size: 20px; }
 
-/* Improve readability of all plot text */
-.plotly text, .ggplot text, .plot text, .gtitle, .xtitle, .ytitle, .annotation-text {
-  font-family: 'Arial', sans-serif !important;
-}
-
-/* Force font size on plotly elements */
-.plotly .gtitle, .plotly .xtitle, .plotly .ytitle, 
-.plotly .trace .legendtext,
-.plotly .annotation-text, 
-.plotly .annotation {
-  /* REMOVE font-size: inherit !important; */
-}
-
-/* Fix for legend text */
-.legend text, .legendtext {
-  /* REMOVE font-size: inherit !important; */
-}
-
-/* Additional spacing for UI elements to accommodate larger text */
-.form-group {
-  margin-bottom: 18px;
-}
-
-/* Add some spacing between UI elements */
-.well { 
-  margin-bottom: 15px; 
-  border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  padding: 18px;
-}
-
-/* Ensure consistent widths for buttons */
-.action-button { 
-  width: 100%; 
-  margin-bottom: 5px;
-}
-
-/* Better tab styling */
+/* Leaner navigation styles */
 .nav-tabs > li > a {
+  font-size: 18px;
+  font-weight: 500;
   background-color: #f8f8f8;
   border-radius: 4px 4px 0 0;
   border: 1px solid #ddd;
   margin-right: 3px;
 }
 
-.nav-tabs > li.active > a, 
-.nav-tabs > li.active > a:hover, 
-.nav-tabs > li.active > a:focus {
+.nav-tabs > li.active > a {
   background-color: #ffffff;
   font-weight: bold;
 }
 
-/* Improved panel headers */
-.panel-heading {
-  background-color: #f5f5f5 !important;
+/* Efficient plot text styling using CSS variables */
+.plotly text, .ggplot text, .plot text {
+  font-family: 'Arial', sans-serif;
+}
+
+/* Plotly text sizing controlled via CSS variables */
+.g-gtitle, .plotly .gtitle {
+  font-size: var(--plotly-title-size, 22px);
   font-weight: bold;
 }
 
-/* Better section headers */
+.xtitle, .ytitle {
+  font-size: var(--plotly-axis-size, 17px);
+}
+
+.xtick text, .ytick text {
+  font-size: var(--plotly-font-size, 16px);
+}
+
+/* Focused spacing for UI components */
+.form-group {
+  margin-bottom: 15px;
+}
+
+/* Optimized wells and panels */
+.well { 
+  margin-bottom: 15px; 
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  padding: 15px;
+}
+
+/* Buttons */
+.action-button { 
+  width: 100%; 
+  margin-bottom: 5px;
+  margin-top: 10px;
+}
+
+/* Panel styling */
+.panel-heading {
+  background-color: #f5f5f5;
+  font-weight: bold;
+}
+
+/* Section headers - combined styles */
 h4 {
-  margin-top: 20px;
+  margin-top: 15px;
   margin-bottom: 10px;
   padding-bottom: 5px;
   border-bottom: 1px solid #eee;
 }
 
-/* Improved notifications */
+/* Leaner notifications */
 .shiny-notification {
   border-radius: 5px;
   box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 
-/* Better file input appearance */
-.btn-file {
-  background-color: #f8f8f8;
-  border-color: #ddd;
-  color: #333;
-}
-
-/* Improve slider appearance */
-.irs-bar, .irs-bar-edge {
+/* Sliders - combined styles */
+.irs-bar, .irs-bar-edge, .irs-from, .irs-to, .irs-single {
   background: #18bc9c;
   border-color: #18bc9c;
 }
 
-.irs-from, .irs-to, .irs-single {
-  background: #18bc9c;
-}
-
-/* Improve datatable styling */
+/* DataTables simplified */
 .dataTables_wrapper .dataTables_length, 
 .dataTables_wrapper .dataTables_filter {
   margin-bottom: 10px;
@@ -121,223 +118,98 @@ h4 {
 
 .dataTable th {
   background-color: #f8f8f8;
-  border-bottom: 2px solid #ddd !important;
+  border-bottom: 2px solid #ddd;
 }
 
-/* Improved plot containers */
-.plotly, .plot-container {
+/* Optimized plot containers with adequate margins */
+.plotly, .plot-container, .js-plotly-plot {
   border: 1px solid #eee;
   border-radius: 5px;
   padding: 5px;
   background-color: white;
-  margin-bottom: 120px !important; /* INCREASED from 50px to 120px for all plots */
-  position: relative; /* Ensure proper stacking context */
-}
-
-/* Make warning messages more prominent */
-.alert-warning {
-  border-left: 5px solid #f39c12;
-}
-
-/* Improve checkboxes and radio buttons */
-.checkbox, .radio {
-  margin-top: 8px;
-  margin-bottom: 8px;
-}
-
-/* Better hover effects for buttons */
-.btn:hover {
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-
-/* Improve form inputs */
-.form-control:focus {
-  border-color: #18bc9c;
-  box-shadow: 0 0 5px rgba(24, 188, 156, 0.3);
-}
-
-/* New styles to prevent plot/button clashing */
-
-/* Add proper spacing between plots and controls */
-.plot-container-wrapper {
-  margin-bottom: 150px !important; /* INCREASED from 100px to 150px */
   position: relative;
-  clear: both;
-  overflow: visible;
-}
-
-/* Ensure controls are properly positioned and don't overlap plots */
-.control-panel {
-  padding: 15px;
-  background-color: #f8f9fa;
-  border-radius: 5px;
-  margin-top: 80px !important; /* INCREASED from 50px to 80px */
-  margin-bottom: 30px;
-  border: 1px solid #e9ecef;
-  clear: both;
-  position: relative;
-  z-index: 200 !important; /* Ensure buttons are above plots and increased priority */
-}
-
-/* Fix plot positioning */
-.shiny-plot-output, .plotly-graph-div {
-  overflow: visible !important;
-  margin-bottom: 120px !important; /* INCREASED from 50px to 120px */
   z-index: 1;
 }
 
-/* Ensure buttons have proper z-index and don't get hidden */
-.btn {
+/* Consolidated plot wrapper styles with simpler selectors */
+.plot-container-wrapper {
+  margin-bottom: 200px; /* Significantly increased for better spacing */
   position: relative;
-  z-index: 100 !important; /* Increased from 10 */
-}
-
-/* Add clearfix to prevent layout issues */
-.row::after {
-  content: "";
-  display: table;
   clear: both;
+  overflow: visible;
+  padding-bottom: 80px; /* Added padding to create more space */
 }
 
-/* Better styling for cluster management buttons */
-.btn-info, .btn-warning {
-  padding: 6px 12px !important;
-  font-size: 14px !important;
-  border-radius: 4px !important;
-  margin-right: 5px !important;
+/* Tab content - simplified */
+.tab-content, .shiny-tab-content {
+  overflow: visible;
+  padding-bottom: 150px; /* Increased padding at the bottom of tab content */
+  position: relative; /* Added for better positioning */
 }
 
-/* Add spacing after horizontal rules */
-hr {
-  margin-top: 60px !important; /* INCREASED from 40px to 60px */
-  margin-bottom: 60px !important; /* INCREASED from 40px to 60px */
-  clear: both;
+/* Button styles - simplified */
+.btn-info, .btn-warning, .btn-primary {
+  position: relative;
+  z-index: 100;
+  margin-right: 5px;
 }
 
-/* Better control placement for checkboxes in button rows */
-.checkbox-inline {
-  padding-top: 8px;
-}
-
-/* Fix for Merge Similar Clusters button */
 .btn-primary {
-  margin-bottom: 15px !important;
-  position: relative;
-  z-index: 1000 !important;
+  margin-bottom: 15px;
 }
 
-/* Ensure plots don't overflow their containers */
-.tab-content {
-  overflow: visible !important;
-  padding-bottom: 100px !important; /* INCREASED from 60px to 100px */
-}
-
-/* Add additional spacing for plotly plots specifically */
-.js-plotly-plot {
-  margin-bottom: 150px !important; /* INCREASED from 70px to 150px */
-}
-
-/* Fix for t-SNE and UMAP plots */
-.plotly-html-widget {
-  margin-bottom: 150px !important; /* INCREASED from 80px to 150px */
-}
-
-/* Additional fixes for t-SNE and Cluster tabs with buttons at bottom */
-.shiny-tab-content {
-  padding-bottom: 120px !important;
-}
-
-/* Specific spacing for tab panels with merge buttons */
-#raw_data-cluster_analysis, #batch_analysis-cluster_management {
-  margin-bottom: 200px !important;
-  padding-bottom: 200px !important;
-}
-
-/* Create space between buttons and plot in Cluster tab */
-#raw_data-clusterPlot, #batch_analysis-sampleClusterPlot {
-  margin-bottom: 200px !important;
-}
-
-/* Adjust plot font sizes on all plotly elements */
-.g-gtitle, .plotly .gtitle, .plotly .xtitle, .plotly .ytitle {
-  /* Use CSS variables for dynamic sizing */
-  font-size: var(--plotly-title-size, 22px) !important;
-}
-
-/* SVG text elements in plots */
-.main-svg text {
-  /* Just set the font family */
-  font-family: 'Arial', sans-serif !important;
-}
-
-/* Size fixes for plotly axis labels */
-.xtick text, .ytick text {
-  font-size: var(--plotly-font-size, 16px) !important;
-}
-
-/* Make sure plotly interactive elements are on top */
-.plotly .hoverlayer {
-  z-index: 1000 !important;
-}
-
-/* Add top margin to the action buttons that follow plots */
-.action-button {
-  margin-top: 10px;
-}
-
-/* Move buttons below plots */
-#raw_data-showMergeModal, #raw_data-resetMerging,
-#batch_analysis-showMergeModal, #batch_analysis-resetMerging {
-  margin-top: 50px !important;
-  position: relative;
-  z-index: 1000 !important;
-}
-
-/* Specific spacing for batch visualization to prevent collision */
-#batch_analysis-sampleClusterPlot, #batch_analysis-sampleHeatmap {
-  margin-bottom: 200px !important; /* Extra space for cluster management */
-}
-
-/* Ensure plotly fonts aren't overridden by browser styles */
-.js-plotly-plot .plotly .gtitle,
-.js-plotly-plot .plotly .xtitle,
-.js-plotly-plot .plotly .ytitle {
-  font-weight: bold !important;
-}
-
-/* Ensure axis labels use the correct font size */
-.js-plotly-plot .plotly .xtick text,
-.js-plotly-plot .plotly .ytick text {
-  /* Don't set font-size here - let plotly manage it */
-  font-family: 'Arial', sans-serif !important;
+/* Horizontal rule - simplified */
+hr {
+  margin-top: 30px;
+  margin-bottom: 30px;
+  clear: both;
 }
 
 /* Legend styling */
 .js-plotly-plot .plotly .legend .scrollbox {
-  /* Don't set font-size here - let plotly manage it */
-  font-family: 'Arial', sans-serif !important;
-  background-color: rgba(255, 255, 255, 0.85) !important;
+  font-family: 'Arial', sans-serif;
+  background-color: rgba(255, 255, 255, 0.85);
 }
 
-/* Fix for plot container spacing */
-.plot-container-wrapper {
-  position: relative;
-  margin-bottom: 120px;
-  overflow: visible;
-}
-
-/* Specific spacing for cluster visualizations */
+/* Control panel for clustering operations */
 .control-panel {
-  background-color: #f8f9fa;
-  border-radius: 5px;
-  margin-top: 80px;
-  margin-bottom: 40px;
   padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 5px; 
+  border: 1px solid #e9ecef;
+  margin-top: 40px;
+  margin-bottom: 30px;
   position: relative;
   z-index: 100;
 }
 
-/* Make sure plotly doesn't have any font size overrides */
-.js-plotly-plot * {
-  /* REMOVE font-size: unset; */
+/* Special plot containers - increased margins */
+#raw_data-clusterPlot, 
+#batch_analysis-sampleClusterPlot,
+#batch_analysis-sampleHeatmap,
+#batch_analysis-sampleDimensionalityPlot,
+#batch_analysis-controlSamplePlot,
+#batch_analysis-treatedSamplePlot,
+#batch_analysis-markerExpressionByCluster,
+#batch_analysis-clusterMappingHeatmap,
+#batch_analysis-signatureMarkerHeatmap {
+  margin-bottom: 200px !important;
+}
+
+/* Extra spacing for Plotly elements */
+.js-plotly-plot {
+  margin-bottom: 80px;
+  padding-bottom: 50px;
+}
+
+/* Additional spacing after plot containers */
+.plotly, .plot-container {
+  margin-bottom: 100px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Hover layer */
+.plotly .hoverlayer {
+  z-index: 999;
 }

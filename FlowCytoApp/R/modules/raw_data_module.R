@@ -124,28 +124,6 @@ rawDataModuleUI <- function(id) {
                               div(
                                 style = "position: relative;",
                                 plotlyOutput(ns("clusterPlot"), height = "600px")
-                              ),
-                              br(),
-                              # Add checkbox for showing cluster labels
-                              fluidRow(
-                                column(12, 
-                                  div(
-                                    style = "margin-bottom: 15px;",
-                                    checkboxInput(ns("showClusterLabels"), "Show Cluster Labels", value = FALSE)
-                                  )
-                                )
-                              ),
-                              # Add merge clusters button inside a well-defined container with spacing
-                              fluidRow(
-                                column(12, 
-                                  div(
-                                    style = "margin-top: 20px; display: flex; justify-content: center; gap: 10px;",
-                                    actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
-                                               class = "btn-info", icon = icon("object-group")),
-                                    actionButton(ns("resetMerging"), "Reset to Original Clusters", 
-                                               class = "btn-warning", icon = icon("undo"))
-                                  )
-                                )
                               )
                      ),
                      tabPanel("Cluster Profiles", shinycssloaders::withSpinner(plotOutput(ns("clusterHeatmap")))),
@@ -1203,7 +1181,7 @@ rawDataModuleServer <- function(id, app_state) {
         )
       
       # Add cluster labels if showing population names and user has enabled labels
-      if (color_by == "Population" && clustering_results$showPopulationLabels() && input$showClusterLabels) {
+      if (color_by == "Population" && clustering_results$showPopulationLabels() && clustering_results$showClusterLabels()) {
         # Calculate cluster centers for label positioning
         cluster_centers <- plot_data %>%
           group_by(Cluster, Population) %>%
@@ -1239,6 +1217,9 @@ rawDataModuleServer <- function(id, app_state) {
     # Cluster heatmap
     output$clusterHeatmap <- renderPlot({
       req(clustering_results$clustering_results())
+      
+      # Explicitly get font_size from app_state
+      font_size <- app_state$plot_settings$font_size
       
       # Use original centers but update if merged
       centers <- clustering_results$clustering_results()$centers
@@ -1465,7 +1446,7 @@ rawDataModuleServer <- function(id, app_state) {
     )
     
     # Add cluster merge modal
-    observeEvent(input$showMergeModal, {
+    observeEvent(input$clustering$showMergeModal, {
       req(clustering_results$clustering_results())
       
       # Get current state of clusters
@@ -1587,7 +1568,7 @@ rawDataModuleServer <- function(id, app_state) {
     })
     
     # Reset clusters to original clustering
-    observeEvent(input$resetMerging, {
+    observeEvent(input$clustering$resetMerging, {
       # Reset merge history
       mergeHistory(list(
         active = FALSE,
