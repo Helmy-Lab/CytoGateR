@@ -63,7 +63,7 @@ batchAnalysisModuleUI <- function(id) {
       # Dimensionality Reduction
       h5("Dimensionality Reduction"),
       selectInput(ns("batchDimRedMethod"), "Method", 
-                  choices = c("t-SNE", "UMAP"), selected = "t-SNE"),
+                  choices = c("t-SNE", "UMAP", "PCA"), selected = "t-SNE"),
       conditionalPanel(
         condition = paste0("input['", ns("batchDimRedMethod"), "'] === 't-SNE'"),
         sliderInput(ns("batchPerplexity"), "t-SNE perplexity", min = 5, max = 50, value = 30),
@@ -83,6 +83,11 @@ batchAnalysisModuleUI <- function(id) {
       conditionalPanel(
         condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'UMAP'"),
         sliderInput(ns("batchNeighbors"), "UMAP n_neighbors", min = 2, max = 100, value = 15)
+      ),
+      
+      conditionalPanel(
+        condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'PCA'"),
+        numericInput(ns("batchPcaComponents"), "PCA: Number of Components", value = 2, min = 2, max = 10)
       ),
       
       # Add clustering controls
@@ -658,6 +663,16 @@ batchAnalysisModuleServer <- function(id, app_state) {
               # Run UMAP
               umap_result <- umap(preprocess_results$scaled_data, n_neighbors = input$batchNeighbors)
               reduced_data <- data.frame(dim1 = umap_result[,1], dim2 = umap_result[,2])
+            } else if (input$batchDimRedMethod == "PCA") {
+              # Run PCA
+              num_components <- input$batchPcaComponents
+              pca_result <- prcomp(preprocess_results$scaled_data, center = TRUE, scale. = TRUE)
+              reduced_data <- data.frame(dim1 = pca_result$x[,1], dim2 = pca_result$x[,2])
+              if (num_components > 2) {
+                for (i in 3:num_components) {
+                  reduced_data[[paste0("PC", i)]] <- pca_result$x[, i]
+                }
+              }
             }
             
             # Create plot data

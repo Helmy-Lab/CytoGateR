@@ -13,7 +13,7 @@ processedDataModuleUI <- function(id) {
       uiOutput(ns("marker_ui")),
       uiOutput(ns("treatment_ui")),
       selectInput(ns("dimred_method"), "Dimensionality Reduction Method", 
-                  choices = c("t-SNE", "UMAP"), selected = "t-SNE"),
+                  choices = c("t-SNE", "UMAP", "PCA"), selected = "t-SNE"),
       conditionalPanel(
         condition = paste0("input['", ns("dimred_method"), "'] === 't-SNE'"),
         numericInput(ns("perplexity_cleaned"), "t-SNE: Perplexity", value = 5, min = 2, max = 50)
@@ -22,6 +22,10 @@ processedDataModuleUI <- function(id) {
         condition = paste0("input['", ns("dimred_method"), "'] === 'UMAP'"),
         numericInput(ns("neighbors"), "UMAP: n_neighbors", value = 5, min = 2, max = 100),
         numericInput(ns("min_dist"), "UMAP: min_dist", value = 0.1, min = 0, max = 1, step = 0.05)
+      ),
+      conditionalPanel(
+        condition = paste0("input['", ns("dimred_method"), "'] === 'PCA'"),
+        numericInput(ns("pca_components"), "PCA: Number of Components", value = 2, min = 2, max = 10)
       ),
       numericInput(ns("n_clusters"), "Number of Clusters (k-means)", value = 3, min = 1),
       sliderInput(ns("plot_width"), "Plot Width (px)", min = 300, max = 1200, value = 600, step = 50),
@@ -33,7 +37,7 @@ processedDataModuleUI <- function(id) {
         tabPanel("Data Preview", DT::DTOutput(ns("preview"))),
         tabPanel("Structure Detection", verbatimTextOutput(ns("structure"))),
         tabPanel("Results Plot", plotlyOutput(ns("plot"))),
-        tabPanel("t-SNE / UMAP", plotlyOutput(ns("dimred_plot"), width = "auto", height = "auto")),
+        tabPanel("t-SNE / UMAP / PCA", plotlyOutput(ns("dimred_plot"), width = "auto", height = "auto")),
         tabPanel("Summary Table", DT::DTOutput(ns("summary_table")))
       )
     )
@@ -169,6 +173,10 @@ processedDataModuleServer <- function(id, app_state) {
                               n_neighbors = min(input$neighbors, nrow(df_sel) - 1),
                               min_dist = input$min_dist)
           dimred <- umap_result
+        } else if (input$dimred_method == "PCA") {
+          # Run PCA
+          pca_result <- prcomp(df_sel, scale. = TRUE)
+          dimred <- pca_result$x[, 1:input$pca_components]
         }
         
         # Run clustering

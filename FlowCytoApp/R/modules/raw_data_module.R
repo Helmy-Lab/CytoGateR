@@ -18,7 +18,7 @@ rawDataModuleUI <- function(id) {
       
       # Dimensionality reduction method selection
       checkboxGroupInput(ns("methods"), "Select Dimensionality Reduction Methods",
-                         choices = c("t-SNE", "UMAP"),
+                         choices = c("t-SNE", "UMAP", "PCA"),
                          selected = c("t-SNE", "UMAP")),
       
       # t-SNE parameters
@@ -43,6 +43,12 @@ rawDataModuleUI <- function(id) {
       conditionalPanel(
         condition = paste0("input['", ns("methods"), "'].includes('UMAP')"),
         numericInput(ns("n_neighbors"), "UMAP n_neighbors", value = 15, min = 2, max = 100)
+      ),
+      
+      # PCA parameters
+      conditionalPanel(
+        condition = paste0("input['", ns("methods"), "'].includes('PCA')"),
+        numericInput(ns("pca_components"), "PCA: Number of Components", value = 2, min = 2, max = 10)
       ),
       
       # QC and gating options
@@ -85,6 +91,7 @@ rawDataModuleUI <- function(id) {
       tabsetPanel(
         tabPanel("t-SNE", shinycssloaders::withSpinner(plotlyOutput(ns("tsnePlot"), height = "600px"))),
         tabPanel("UMAP", shinycssloaders::withSpinner(plotlyOutput(ns("umapPlot"), height = "600px"))),
+        tabPanel("PCA", shinycssloaders::withSpinner(plotlyOutput(ns("pcaPlot"), height = "600px"))),
         tabPanel("Data Info", verbatimTextOutput(ns("fcsInfo")), uiOutput(ns("optimizationMetricsUI"))),
         # Add new tab for Live/Dead Analysis
         tabPanel("Live/Dead Analysis", 
@@ -628,6 +635,22 @@ rawDataModuleServer <- function(id, app_state) {
           results$umap <- data.frame(umap1 = umap_result[,1], umap2 = umap_result[,2])
         }
         
+        if ("PCA" %in% input$methods) {
+          incProgress(0.8, detail = "Running PCA...")
+          pca_result <- prcomp(preprocessing_results$scaled_data, center = TRUE, scale. = TRUE)
+          results$pca <- data.frame(pca1 = pca_result$x[,1], pca2 = pca_result$x[,2])
+          
+          # Store additional components if requested
+          if (input$pca_components > 2) {
+            for (i in 3:input$pca_components) {
+              results$pca[[paste0("pca", i)]] <- pca_result$x[, i]
+            }
+          }
+          
+          # Store PCA summary information for metrics
+          results$pca_summary <- summary(pca_result)
+        }
+        
         # Create plot data
         plot_data <- as.data.frame(preprocessing_results$sampled_data)
         colnames(plot_data) <- input$selectedMarkers
@@ -640,6 +663,20 @@ rawDataModuleServer <- function(id, app_state) {
         if (!is.null(results$umap)) {
           plot_data$umap1 <- results$umap$umap1
           plot_data$umap2 <- results$umap$umap2
+        }
+        if (!is.null(results$pca)) {
+          plot_data$pca1 <- results$pca$pca1
+          plot_data$pca2 <- results$pca$pca2
+          
+          # Add additional PCA components if they exist
+          if (input$pca_components > 2) {
+            for (i in 3:input$pca_components) {
+              pca_col <- paste0("pca", i)
+              if (pca_col %in% colnames(results$pca)) {
+                plot_data[[pca_col]] <- results$pca[[pca_col]]
+              }
+            }
+          }
         }
         
         results$plot_data <- plot_data
@@ -739,6 +776,28 @@ rawDataModuleServer <- function(id, app_state) {
         )
       }
       
+      if (!is.null(results$pca)) {
+        # Calculate PCA metrics if it was run
+        pca_data <- results$pca
+        
+        # Calculate explained variance for PCA
+        pca_variance <- tryCatch({
+          if (!is.null(results$pca_summary)) {
+            # Extract proportion of variance explained by first 2 components
+            var_explained <- results$pca_summary$importance[2, 1:2]  # Proportion of Variance row
+            sum(var_explained)
+          } else {
+            NA
+          }
+        }, error = function(e) NA)
+        
+        # Store PCA metrics
+        metrics$pca <- list(
+          variance_explained = round(pca_variance, 4),
+          components = input$pca_components
+        )
+      }
+      
       # Create UI elements to display metrics
       metrics_ui <- tagList(
         hr(),
@@ -772,19 +831,60 @@ rawDataModuleServer <- function(id, app_state) {
         )
       }
       
-      # Add recommendation if both methods are available
-      if (!is.null(metrics$tsne) && !is.null(metrics$umap)) {
-        # Determine which method seems better (simple heuristic)
-        tsne_score <- 1 - min(metrics$tsne$kl_divergence, 1)  # Convert to 0-1 scale where higher is better
-        umap_score <- max(min(metrics$umap$trustworthiness, 1), 0)  # Ensure in 0-1 range
+      # Add PCA metrics if available
+      if (!is.null(metrics$pca)) {
+        metrics_ui <- tagAppendChildren(
+          metrics_ui,
+          div(
+            h5("PCA Metrics:"),
+            p(paste("Variance Explained:", metrics$pca$variance_explained, 
+                    "(higher is better)")),
+            p(paste("Components:", metrics$pca$components))
+          )
+        )
+      }
+      
+      # Add recommendation if multiple methods are available
+      available_methods <- c()
+      if (!is.null(metrics$tsne)) available_methods <- c(available_methods, "t-SNE")
+      if (!is.null(metrics$umap)) available_methods <- c(available_methods, "UMAP")
+      if (!is.null(metrics$pca)) available_methods <- c(available_methods, "PCA")
+      
+      if (length(available_methods) > 1) {
+        # Calculate simple scores for comparison
+        scores <- list()
         
-        recommended <- if (tsne_score > umap_score) "t-SNE" else "UMAP"
+        if (!is.null(metrics$tsne)) {
+          scores$tsne <- 1 - min(metrics$tsne$kl_divergence, 1)  # Convert to 0-1 scale where higher is better
+        }
+        if (!is.null(metrics$umap)) {
+          scores$umap <- max(min(metrics$umap$trustworthiness, 1), 0)  # Ensure in 0-1 range
+        }
+        if (!is.null(metrics$pca)) {
+          scores$pca <- min(metrics$pca$variance_explained, 1)  # Already in 0-1 range
+        }
+        
+        # Find the best method
+        best_method <- names(scores)[which.max(unlist(scores))]
+        best_score <- round(max(unlist(scores)), 3)
+        
+        # Create recommendation text
+        rec_text <- paste0("Based on calculated metrics, ", best_method, 
+                          " may provide the best results for this dataset (score: ", best_score, ").")
+        
+        # Add context about what each method is good for
+        if (length(available_methods) >= 2) {
+          rec_text <- paste0(rec_text, "\n\nMethod characteristics:\n",
+                            "• t-SNE: Best for revealing local structure and clusters\n",
+                            "• UMAP: Good balance of local and global structure\n",
+                            "• PCA: Linear method, preserves global distances, interpretable components")
+        }
         
         metrics_ui <- tagAppendChildren(
           metrics_ui,
           div(
             h5("Recommendation:"),
-            p(paste("Based on calculated metrics, ", recommended, " may provide better results for this dataset."))
+            p(rec_text, style = "white-space: pre-line;")
           )
         )
       }
@@ -833,6 +933,7 @@ rawDataModuleServer <- function(id, app_state) {
       # Force all plotly outputs to redraw with new settings
       session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("tsnePlot")))
       session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("umapPlot")))
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("pcaPlot")))
     })
     
     # Render t-SNE plot
@@ -1071,6 +1172,124 @@ rawDataModuleServer <- function(id, app_state) {
       return(p_plotly)
     })
     
+    # Render PCA plot
+    output$pcaPlot <- renderPlotly({
+      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
+      req(processedData(), "PCA" %in% input$methods)
+      plot_data <- processedData()$plot_data
+      req("pca1" %in% colnames(plot_data))
+      
+      # Create a copy of plot_data
+      plot_data_copy <- plot_data
+      
+      # Add cluster information if available
+      if (!is.null(clustering_results$clustering_results()) && 
+          clustering_results$showClusteringOptions()) {
+        plot_data_copy$Cluster <- as.factor(clustering_results$clustering_results()$cluster_ids)
+        color_by <- "Cluster"
+      } else {
+        color_by <- NULL
+      }
+      
+      # Create base plot
+      p <- createDimReductionPlot(
+        plot_data = plot_data_copy,
+        dim1 = "pca1",
+        dim2 = "pca2",
+        colorBy = color_by,
+        color_palette = color_palette,
+        point_size = point_size,
+        font_size = font_size,
+        title = "PCA Projection",
+        xlab = "PC 1",
+        ylab = "PC 2"
+      )
+      
+      # Convert to plotly with explicit font settings
+      p_plotly <- ggplotly(p, width = width, height = height)
+      
+      # Apply completely explicit font settings to ensure they're properly applied
+      p_plotly <- p_plotly %>% layout(
+        font = list(
+          family = "Arial",
+          size = font_size,
+          color = "black"
+        ),
+        title = list(
+          text = "PCA Projection",
+          font = list(
+            family = "Arial",
+            size = font_size * 1.2,
+            color = "black"
+          )
+        ),
+        xaxis = list(
+          title = list(
+            text = "PC 1",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          ),
+          scaleanchor = "y",
+          scaleratio = 1
+        ),
+        yaxis = list(
+          title = list(
+            text = "PC 2",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          )
+        ),
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9
+          )
+        ),
+        # Add legend settings if clusters are shown
+        legend = if (!is.null(color_by)) list(
+          title = list(
+            text = "Cluster",
+            font = list(
+              family = "Arial",
+              size = font_size,
+              color = "black"
+            )
+          ),
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9,
+            color = "black"
+          ),
+          bgcolor = "rgba(255, 255, 255, 0.9)",
+          bordercolor = "rgba(0, 0, 0, 0.2)",
+          borderwidth = 1
+        ) else list()
+      )
+      
+      return(p_plotly)
+    })
+    
     # Cluster visualization in dedicated tab
     output$clusterPlot <- renderPlotly({
       # Explicitly track app_state$plot_settings to make this plot reactive to font changes
@@ -1131,6 +1350,10 @@ rawDataModuleServer <- function(id, app_state) {
         dim1 <- "umap1"
         dim2 <- "umap2"
         dim_labels <- c("UMAP 1", "UMAP 2")
+      } else if ("pca1" %in% colnames(plot_data)) {
+        dim1 <- "pca1"
+        dim2 <- "pca2"
+        dim_labels <- c("PC 1", "PC 2")
       } else {
         # Fallback to first two markers if no dimension reduction available
         dim1 <- input$selectedMarkers[1]
