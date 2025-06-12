@@ -436,3 +436,82 @@ get_color_palette <- function(palette_name) {
          scale_color_viridis_d() # Default to viridis
   )
 }
+
+# Spillover compensation plotting functions
+
+# Function to create spillover matrix heatmap
+createSpilloverHeatmap <- function(spillover_matrix, title = "Spillover Matrix", font_size = 12) {
+  # Convert matrix to long format for ggplot
+  spillover_df <- as.data.frame(spillover_matrix)
+  spillover_df$From <- rownames(spillover_df)
+  spillover_long <- tidyr::pivot_longer(spillover_df, -From, names_to = "To", values_to = "Spillover")
+  
+  # Create the heatmap
+  ggplot(spillover_long, aes(x = To, y = From, fill = Spillover)) +
+    geom_tile(color = "white", size = 0.5) +
+    geom_text(aes(label = round(Spillover, 3)), size = font_size/3, color = "black") +
+    scale_fill_gradient2(
+      low = "blue", 
+      mid = "white", 
+      high = "red", 
+      midpoint = 0, 
+      name = "Spillover\nCoefficient",
+      limits = c(-1, 1)  # Standard range for spillover coefficients
+    ) +
+    theme_minimal(base_size = font_size) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+      axis.text.y = element_text(hjust = 1),
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      panel.grid = element_blank(),
+      axis.title = element_text(face = "bold")
+    ) +
+    labs(
+      title = title,
+      x = "From Channel (Spilling Into)",
+      y = "To Channel (Receiving Spillover)"
+    ) +
+    coord_fixed()  # Keep squares square
+}
+
+# Function to create before/after compensation comparison
+createCompensationComparisonPlot <- function(original_data, compensated_data, 
+                                           channel1, channel2, 
+                                           n_sample = 5000, font_size = 12) {
+  # Sample data for faster plotting
+  if (nrow(original_data) > n_sample) {
+    sample_indices <- sample(nrow(original_data), n_sample)
+    original_data <- original_data[sample_indices, ]
+    compensated_data <- compensated_data[sample_indices, ]
+  }
+  
+  # Create comparison data frame
+  plot_data <- rbind(
+    data.frame(
+      x = original_data[, channel1],
+      y = original_data[, channel2],
+      Type = "Before Compensation"
+    ),
+    data.frame(
+      x = compensated_data[, channel1],
+      y = compensated_data[, channel2],
+      Type = "After Compensation"
+    )
+  )
+  
+  # Create the plot
+  ggplot(plot_data, aes(x = x, y = y)) +
+    geom_point(alpha = 0.3, size = 0.5, color = "steelblue") +
+    facet_wrap(~Type, ncol = 2) +
+    theme_minimal(base_size = font_size) +
+    theme(
+      strip.text = element_text(size = font_size, face = "bold"),
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.title = element_text(face = "bold")
+    ) +
+    labs(
+      title = paste("Compensation Effect:", channel1, "vs", channel2),
+      x = channel1, 
+      y = channel2
+    )
+}

@@ -29,7 +29,7 @@ ui <- navbarPage(
   ),
   
   # Application title
-  title = "Flow Cytometry Analysis Tool",
+  title = "CytoVerse",
   
   # Tab for the Settings Module
   tabPanel("Settings", 
@@ -39,6 +39,11 @@ ui <- navbarPage(
   # Tab for the Raw Data Module
   tabPanel("Raw Data", 
            rawDataModuleUI("raw_data")
+  ),
+  
+  # Tab for the Gating Module
+  tabPanel("Interactive Gating", 
+           gatingModuleUI("gating")
   ),
   
   # Tab for the Processed Data Module
@@ -67,6 +72,7 @@ server <- function(input, output, session) {
   
   # Call module servers
   raw_data_results <- rawDataModuleServer("raw_data", app_state)
+  gating_results <- gatingModuleServer("gating", app_state, raw_data_results)
   batch_results <- batchAnalysisModuleServer("batch_analysis", app_state)
   settings_results <- settingsModuleServer("settings", app_state)
   

@@ -94,12 +94,13 @@ visualizationModuleServer <- function(id, plot_data, clustering_results = reacti
       req(plot_data())
       data <- plot_data()
       
-      # Check for dimension columns (expected for tsne, umap, pca)
+      # Check for dimension columns (expected for tsne, umap, pca, mds)
       has_dim1 <- "dim1" %in% colnames(data)
       has_dim2 <- "dim2" %in% colnames(data)
       has_tsne <- "tsne1" %in% colnames(data) && "tsne2" %in% colnames(data)
       has_umap <- "umap1" %in% colnames(data) && "umap2" %in% colnames(data)
       has_pca  <- "pca1" %in% colnames(data) && "pca2" %in% colnames(data)
+      has_mds  <- "mds1" %in% colnames(data) && "mds2" %in% colnames(data)
       
       # Determine x and y variables
       if (has_dim1 && has_dim2) {
@@ -118,6 +119,10 @@ visualizationModuleServer <- function(id, plot_data, clustering_results = reacti
         x_var <- "pca1"
         y_var <- "pca2"
         dim_method <- "PCA"
+      } else if (has_mds) {
+        x_var <- "mds1"
+        y_var <- "mds2"
+        dim_method <- "MDS"
       } else if (length(colnames(data)) >= 2) {
         # Fallback to first two columns
         x_var <- colnames(data)[1]

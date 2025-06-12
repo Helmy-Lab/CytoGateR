@@ -11,14 +11,54 @@ rawDataModuleUI <- function(id) {
       fileInput(ns("fcsFile"), "Upload FCS/CSV/TSV File", accept = c(".fcs", ".csv", ".tsv")),
       uiOutput(ns("markerSelectUI")),
       
+      # Spillover compensation options
+      hr(),
+      h4("Spillover Compensation"),
+      checkboxInput(ns("enableCompensation"), "Enable Spillover Compensation", value = FALSE),
+      conditionalPanel(
+        condition = paste0("input['", ns("enableCompensation"), "'] === true"),
+        
+        # Upload multiple control files
+        fileInput(ns("controlFiles"), "Upload Control Files (FCS only)", 
+                  accept = c(".fcs"), multiple = TRUE),
+        
+        # Upload unstained control file
+        fileInput(ns("unstainedControlFile"), "Upload Unstained Control File (FCS only)", 
+                  accept = c(".fcs"), multiple = FALSE),
+        
+        # UI for assigning markers to control files
+        uiOutput(ns("markerAssignmentUI")),
+        
+        # Button to compute spillover matrix
+        actionButton(ns("computeSpillover"), "Compute Spillover Matrix", 
+                     class = "btn-info", style = "margin-bottom: 10px;"),
+        
+        # Display spillover computation status
+        verbatimTextOutput(ns("spilloverStatus")),
+        
+        # Option to upload pre-computed spillover matrix
+        hr(),
+        fileInput(ns("spilloverMatrixFile"), "Or Upload Pre-computed Spillover Matrix (CSV)", 
+                  accept = c(".csv")),
+        
+        # Display current spillover matrix
+        conditionalPanel(
+          condition = paste0("output['", ns("spilloverStatus"), "'] !== null"),
+          h5("Current Spillover Matrix:"),
+          DT::dataTableOutput(ns("spilloverMatrixDisplay"))
+        )
+      ),
+      
       # Transform options
+      hr(),
+      h4("Data Transformation"),
       checkboxInput(ns("transform"), "Apply arcsinh transformation", value = TRUE),
       numericInput(ns("cofactor"), "Transformation cofactor", value = 5, min = 1, max = 10),
-      numericInput(ns("nEvents"), "Number of events to analyze", value = 5000, min = 100, step = 1000),
+      numericInput(ns("nEvents"), "Number of events to analyze", value = 5000, min = 100, step = 100),
       
       # Dimensionality reduction method selection
       checkboxGroupInput(ns("methods"), "Select Dimensionality Reduction Methods",
-                         choices = c("t-SNE", "UMAP", "PCA"),
+                         choices = c("t-SNE", "UMAP", "PCA", "MDS"),
                          selected = c("t-SNE", "UMAP")),
       
       # t-SNE parameters
@@ -49,6 +89,13 @@ rawDataModuleUI <- function(id) {
       conditionalPanel(
         condition = paste0("input['", ns("methods"), "'].includes('PCA')"),
         numericInput(ns("pca_components"), "PCA: Number of Components", value = 2, min = 2, max = 10)
+      ),
+      
+      # MDS parameters
+      conditionalPanel(
+        condition = paste0("input['", ns("methods"), "'].includes('MDS')"),
+        tags$p("MDS does not require additional parameters. It uses Euclidean distances by default."),
+        tags$small("Note: MDS can be slow for large datasets.")
       ),
       
       # QC and gating options
@@ -92,7 +139,37 @@ rawDataModuleUI <- function(id) {
         tabPanel("t-SNE", shinycssloaders::withSpinner(plotlyOutput(ns("tsnePlot"), height = "600px"))),
         tabPanel("UMAP", shinycssloaders::withSpinner(plotlyOutput(ns("umapPlot"), height = "600px"))),
         tabPanel("PCA", shinycssloaders::withSpinner(plotlyOutput(ns("pcaPlot"), height = "600px"))),
+        tabPanel("MDS", shinycssloaders::withSpinner(plotlyOutput(ns("mdsPlot"), height = "600px"))),
         tabPanel("Data Info", verbatimTextOutput(ns("fcsInfo")), uiOutput(ns("optimizationMetricsUI"))),
+        tabPanel("Spillover Compensation", 
+                 conditionalPanel(
+                   condition = paste0("input['", ns("enableCompensation"), "'] === true"),
+                   fluidRow(
+                     column(6,
+                            h4("Spillover Matrix"),
+                            DT::dataTableOutput(ns("spilloverMatrixTable"))
+                     ),
+                     column(6,
+                            h4("Compensation Effects"),
+                            plotOutput(ns("compensationEffectsPlot"), height = "400px")
+                     )
+                   ),
+                   hr(),
+                   fluidRow(
+                     column(12,
+                            h4("Before vs After Compensation"),
+                            plotOutput(ns("beforeAfterCompensationPlot"), height = "500px")
+                     )
+                   )
+                 ),
+                 conditionalPanel(
+                   condition = paste0("input['", ns("enableCompensation"), "'] === false"),
+                   div(class = "alert alert-info",
+                       h4("Spillover Compensation Disabled"),
+                       p("Enable spillover compensation in the sidebar to view compensation analysis.")
+                   )
+                 )
+        ),
         # Add new tab for Live/Dead Analysis
         tabPanel("Live/Dead Analysis", 
                  fluidRow(
@@ -170,9 +247,38 @@ rawDataModuleServer <- function(id, app_state) {
       fcs <- rawFCS()
       cat("File name: ", input$fcsFile$name, "\n")
       cat("Dimensions: ", paste(dim(fcs), collapse = " x "), "\n")
+      
       if (inherits(fcs, "flowFrame")) {
-        cat("Parameters:\n")
-        print(head(parameters(fcs)[, c("name", "desc")], 20))
+        cat("\nParameters (Parameter Name -> Marker Description):\n")
+        cat(paste(rep("=", 60), collapse = ""), "\n")
+        
+        params <- parameters(fcs)
+        param_info <- data.frame(
+          Parameter = params$name,
+          Description = params$desc,
+          stringsAsFactors = FALSE
+        )
+        
+        # Clean up descriptions and show mapping
+        for (i in 1:nrow(param_info)) {
+          param_name <- param_info$Parameter[i]
+          param_desc <- param_info$Description[i]
+          
+          if (is.na(param_desc) || param_desc == "") {
+            param_desc <- "(No description)"
+          }
+          
+          # Highlight fluorescence channels
+          if (grepl("^(FSC|SSC|Time|Width|Height)", param_name)) {
+            cat(sprintf("  %-8s -> %s (Scatter/Time)\n", param_name, param_desc))
+          } else {
+            cat(sprintf("  %-8s -> %s *** FLUORESCENCE ***\n", param_name, param_desc))
+          }
+        }
+        
+        cat("\nNote: For spillover compensation, use the fluorescence channels marked above.\n")
+        cat("The parameter names ($P1N, $P2N, etc.) are internal identifiers.\n")
+        cat("The descriptions show the actual marker names (e.g., CD3-FITC, CD4-PE).\n")
       } else {
         cat("Column names:\n")
         print(colnames(fcs))
@@ -185,17 +291,38 @@ rawDataModuleServer <- function(id, app_state) {
       
       # Get marker choices based on data type
       if (inherits(rawFCS(), "flowFrame")) {
-        exprs_data <- exprs(rawFCS())
-        params <- parameters(rawFCS())
-        choices <- setNames(colnames(exprs_data), paste0(colnames(exprs_data), " - ", params$desc))
+        fcs_data <- rawFCS()
+        params <- parameters(fcs_data)
+        parameter_names <- colnames(exprs(fcs_data))
+        parameter_descriptions <- params$desc[match(parameter_names, params$name)]
+        
+        # Create choices with format: "Parameter Name - Description"
+        choices <- setNames(
+          parameter_names,
+          sapply(1:length(parameter_names), function(i) {
+            param_name <- parameter_names[i]
+            param_desc <- parameter_descriptions[i]
+            if (!is.na(param_desc) && param_desc != "") {
+              paste0(param_name, " - ", param_desc)
+            } else {
+              param_name
+            }
+          })
+        )
+        
+        # Filter to show only fluorescence channels by default, but allow all
+        fluorescence_channels <- choices[!grepl("^(FSC|SSC|Time|Width|Height)", names(choices))]
+        default_selection <- names(fluorescence_channels)[1:min(5, length(fluorescence_channels))]
+        
       } else {
         exprs_data <- rawFCS()
         choices <- colnames(exprs_data)
+        default_selection <- choices[1:min(5, length(choices))]
       }
       
       selectInput(session$ns("selectedMarkers"), "Select Markers/Channels", 
                   choices = choices, 
-                  selected = choices[1:min(5, length(choices))], 
+                  selected = default_selection, 
                   multiple = TRUE)
     })
     
@@ -205,29 +332,53 @@ rawDataModuleServer <- function(id, app_state) {
       
       # Get marker choices based on data type
       if (inherits(rawFCS(), "flowFrame")) {
-        exprs_data <- exprs(rawFCS())
-        params <- parameters(rawFCS())
+        fcs_data <- rawFCS()
+        params <- parameters(fcs_data)
+        parameter_names <- colnames(exprs(fcs_data))
+        parameter_descriptions <- params$desc[match(parameter_names, params$name)]
         
-        # Look for potential live/dead markers 
-        potential_ld_markers <- grep("live|dead|viability|FL3-A", 
-                                     colnames(exprs_data), 
-                                     ignore.case = TRUE, 
-                                     value = TRUE)
+        # Look for potential live/dead markers in both parameter names and descriptions
+        potential_ld_markers_names <- grep("live|dead|viability|FL3-A", 
+                                          parameter_names, 
+                                          ignore.case = TRUE, 
+                                          value = TRUE)
+        
+        potential_ld_markers_desc <- grep("live|dead|viability", 
+                                         parameter_descriptions, 
+                                         ignore.case = TRUE)
+        
+        if (length(potential_ld_markers_desc) > 0) {
+          potential_ld_markers_from_desc <- parameter_names[potential_ld_markers_desc]
+        } else {
+          potential_ld_markers_from_desc <- character(0)
+        }
+        
+        # Combine and deduplicate potential markers
+        potential_ld_markers <- unique(c(potential_ld_markers_names, potential_ld_markers_from_desc))
         
         # If no matches found, include all channels
         if (length(potential_ld_markers) == 0) {
-          potential_ld_markers <- colnames(exprs_data)
+          potential_ld_markers <- parameter_names
         }
         
-        # Create named vector for selection
-        choices <- c("None", setNames(
+        # Create named vector for selection with descriptions
+        marker_choices <- setNames(
           potential_ld_markers,
-          paste0(potential_ld_markers, " - ", params$desc[match(potential_ld_markers, colnames(exprs_data))])
-        ))
+          sapply(potential_ld_markers, function(param) {
+            desc <- parameter_descriptions[match(param, parameter_names)]
+            if (!is.na(desc) && desc != "") {
+              paste0(param, " - ", desc)
+            } else {
+              param
+            }
+          })
+        )
+        
+        choices <- c("None" = "None", marker_choices)
         
         # Find the default selected marker
         default_selection <- "None"
-        live_dead_matches <- grep("live.*dead|dead.*live|viability", choices, ignore.case = TRUE)
+        live_dead_matches <- grep("live.*dead|dead.*live|viability", names(choices), ignore.case = TRUE)
         if (length(live_dead_matches) > 0) {
           default_selection <- choices[live_dead_matches[1]]
         }
@@ -244,6 +395,9 @@ rawDataModuleServer <- function(id, app_state) {
     
     # Store processed data
     processedData <- reactiveVal(NULL)
+    
+    # Store spillover compensation data
+    spilloverData <- reactiveVal(NULL)
     
     # Replace single mergedClusters reactive with a more comprehensive structure
     mergeHistory <- reactiveVal(list(
@@ -410,13 +564,21 @@ rawDataModuleServer <- function(id, app_state) {
         }
         
         # Find FSC-A column
-        fsc_col <- grep("^FSC-A", colnames(exprs(rawFCS())), value = TRUE)
+        fcs_columns <- colnames(exprs(rawFCS()))
+        fsc_col <- grep("^FSC-A", fcs_columns, value = TRUE)
         if (length(fsc_col) == 0) {
           # If FSC-A not found, try to find any FSC column
-          fsc_col <- grep("^FSC", colnames(exprs(rawFCS())), value = TRUE)
+          fsc_col <- grep("^FSC", fcs_columns, value = TRUE)
           if (length(fsc_col) == 0) {
             # If still no FSC, use the first column
-            fsc_col <- colnames(exprs(rawFCS()))[1]
+            if (length(fcs_columns) > 0) {
+              fsc_col <- fcs_columns[1]
+            } else {
+              return(ggplot() + 
+                       annotate("text", x = 0.5, y = 0.5, 
+                                label = "No data columns found in FCS file") +
+                       theme_void())
+            }
           } else {
             fsc_col <- fsc_col[1]
           }
@@ -424,18 +586,37 @@ rawDataModuleServer <- function(id, app_state) {
           fsc_col <- fsc_col[1]
         }
         
-        if (!(ld_marker %in% colnames(exprs(rawFCS())))) {
+        # Validate that both columns exist
+        if (!(ld_marker %in% fcs_columns)) {
           return(ggplot() + 
                    annotate("text", x = 0.5, y = 0.5, 
                             label = paste("Marker", ld_marker, "not found in dataset")) +
                    theme_void())
         }
         
-        # Create scatter plot data
-        plot_data <- data.frame(
-          FSC = exprs(rawFCS())[, fsc_col],
-          LiveDead = exprs(rawFCS())[, ld_marker]
-        )
+        if (!(fsc_col %in% fcs_columns)) {
+          return(ggplot() + 
+                   annotate("text", x = 0.5, y = 0.5, 
+                            label = paste("FSC column", fsc_col, "not found in dataset")) +
+                   theme_void())
+        }
+        
+        # Create scatter plot data with error handling
+        plot_data <- tryCatch({
+          data.frame(
+            FSC = exprs(rawFCS())[, fsc_col],
+            LiveDead = exprs(rawFCS())[, ld_marker]
+          )
+        }, error = function(e) {
+          return(NULL)
+        })
+        
+        if (is.null(plot_data)) {
+          return(ggplot() + 
+                   annotate("text", x = 0.5, y = 0.5, 
+                            label = "Error accessing data columns - check FCS file format") +
+                   theme_void())
+        }
       } else {
         # For non-FCS files
         if (!(input$liveDeadMarkerSelect %in% colnames(rawFCS()))) {
@@ -505,6 +686,271 @@ rawDataModuleServer <- function(id, app_state) {
       return(p)
     })
     
+    # Dynamic marker assignment UI for control files
+    output$markerAssignmentUI <- renderUI({
+      req(input$controlFiles)
+      
+      # Get available markers from main data
+      if (!is.null(rawFCS()) && inherits(rawFCS(), "flowFrame")) {
+        fcs_data <- rawFCS()
+        params <- parameters(fcs_data)
+        
+        # Create named choices showing both parameter name and description
+        parameter_names <- colnames(exprs(fcs_data))
+        parameter_descriptions <- params$desc[match(parameter_names, params$name)]
+        
+        # Create choices with format: "Parameter Name - Description"
+        choices <- setNames(
+          parameter_names,
+          sapply(1:length(parameter_names), function(i) {
+            param_name <- parameter_names[i]
+            param_desc <- parameter_descriptions[i]
+            if (!is.na(param_desc) && param_desc != "") {
+              paste0(param_name, " - ", param_desc)
+            } else {
+              param_name
+            }
+          })
+        )
+        
+        # Filter out non-fluorescence channels (keep only relevant markers)
+        fluorescence_channels <- choices[!grepl("^(FSC|SSC|Time|Width|Height)", names(choices))]
+        
+        # Add instructional text
+        instructions <- div(
+          class = "alert alert-info",
+          h5("Spillover Compensation Setup Instructions:"),
+          tags$ol(
+            tags$li("Upload your ", tags$strong("unstained control"), " file above"),
+            tags$li("Upload your ", tags$strong("single-stain control"), " files (one per fluorophore)"),
+            tags$li("Assign each single-stain control to its corresponding marker below"),
+            tags$li("Click 'Compute Spillover Matrix' when all files are assigned")
+          ),
+          p(tags$em("Note: You need one single-stain control for each fluorescent marker you want to compensate."))
+        )
+        
+        # Create UI for each uploaded control file
+        control_file_names <- input$controlFiles$name
+        
+        ui_elements <- lapply(1:length(control_file_names), function(i) {
+          file_name <- control_file_names[i]
+          div(
+            style = "margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px;",
+            h5(paste("Single-Stain Control:", file_name)),
+            p(style = "font-size: 0.9em; color: #666;", 
+              "This file should contain cells stained with ONLY ONE fluorophore. Assign it to the corresponding marker:"),
+            selectInput(
+              inputId = session$ns(paste0("marker_", i)),
+              label = "Assign to Marker:",
+              choices = c("Select marker..." = "", fluorescence_channels),
+              selected = "",
+              width = "100%"
+            )
+          )
+        })
+        
+        do.call(tagList, c(list(instructions), ui_elements))
+      } else {
+        div(class = "alert alert-warning",
+            "Please upload main FCS file first to see available markers")
+      }
+    })
+    
+    # Compute spillover matrix
+    observeEvent(input$computeSpillover, {
+      req(input$controlFiles, input$unstainedControlFile)
+      
+      # Check if unstained control is uploaded
+      if (is.null(input$unstainedControlFile)) {
+        showNotification("Please upload an unstained control file", type = "error")
+        return()
+      }
+      
+      # Get marker assignments
+      marker_assignments <- list()
+      control_file_paths <- list()
+      
+      for (i in 1:nrow(input$controlFiles)) {
+        marker_input_id <- paste0("marker_", i)
+        if (!is.null(input[[marker_input_id]]) && input[[marker_input_id]] != "") {
+          file_name <- input$controlFiles$name[i]
+          file_path <- input$controlFiles$datapath[i]
+          
+          marker_assignments[[file_name]] <- input[[marker_input_id]]
+          control_file_paths[[file_name]] <- file_path
+        }
+      }
+      
+      if (length(marker_assignments) < 2) {
+        showNotification("Please assign at least 2 control files to markers", type = "error")
+        return()
+      }
+      
+      # Add unstained control
+      unstained_file_path <- input$unstainedControlFile$datapath
+      unstained_file_name <- input$unstainedControlFile$name
+      
+      # Compute spillover matrix
+      withProgress(message = 'Computing spillover matrix...', value = 0, {
+        incProgress(0.5, detail = "Processing control files...")
+        
+        spillover_result <- computeSpilloverMatrix(control_file_paths, marker_assignments, 
+                                                 unstained_file_path, unstained_file_name)
+        
+        incProgress(0.5, detail = "Finalizing matrix...")
+        
+        if (spillover_result$success) {
+          # Store the spillover data
+          spilloverData(spillover_result)
+          
+          showNotification(spillover_result$message, type = "message", duration = 5)
+        } else {
+          showNotification(spillover_result$message, type = "error", duration = 10)
+        }
+      })
+    })
+    
+    # Handle pre-computed spillover matrix upload
+    observeEvent(input$spilloverMatrixFile, {
+      req(input$spilloverMatrixFile)
+      
+      tryCatch({
+        # Read CSV file
+        spillover_matrix <- read.csv(input$spilloverMatrixFile$datapath, row.names = 1)
+        spillover_matrix <- as.matrix(spillover_matrix)
+        
+        # Validate the matrix
+        if (!is.null(rawFCS()) && inherits(rawFCS(), "flowFrame")) {
+          validation_result <- validateSpilloverMatrix(spillover_matrix, colnames(exprs(rawFCS())))
+          
+          if (validation_result$valid) {
+            # Store the spillover data
+            spilloverData(list(
+              spillover_matrix = spillover_matrix,
+              success = TRUE,
+              message = paste("Pre-computed spillover matrix loaded:", validation_result$message)
+            ))
+            
+            showNotification("Spillover matrix loaded successfully", type = "message")
+          } else {
+            showNotification(validation_result$message, type = "error")
+          }
+        } else {
+          # Store without validation if no main data loaded yet
+          spilloverData(list(
+            spillover_matrix = spillover_matrix,
+            success = TRUE,
+            message = "Pre-computed spillover matrix loaded (not yet validated)"
+          ))
+          
+          showNotification("Spillover matrix loaded (will be validated when main data is loaded)", type = "message")
+        }
+        
+      }, error = function(e) {
+        showNotification(paste("Error loading spillover matrix:", e$message), type = "error")
+      })
+    })
+    
+    # Display spillover status
+    output$spilloverStatus <- renderText({
+      if (!is.null(spilloverData())) {
+        spilloverData()$message
+      } else {
+        "No spillover matrix computed or loaded yet."
+      }
+    })
+    
+    # Display spillover matrix in sidebar
+    output$spilloverMatrixDisplay <- DT::renderDataTable({
+      req(spilloverData(), spilloverData()$success)
+      
+      DT::datatable(
+        round(spilloverData()$spillover_matrix, 4),
+        options = list(scrollX = TRUE, pageLength = 10)
+      )
+    })
+    
+    # Display spillover matrix in main panel
+    output$spilloverMatrixTable <- DT::renderDataTable({
+      req(spilloverData(), spilloverData()$success)
+      
+      DT::datatable(
+        round(spilloverData()$spillover_matrix, 4),
+        options = list(scrollX = TRUE, pageLength = 15),
+        caption = "Spillover Matrix (values represent spillover from column to row)"
+      ) %>% formatRound(columns = 1:ncol(spilloverData()$spillover_matrix), digits = 4)
+    })
+    
+    # Plot compensation effects
+    output$compensationEffectsPlot <- renderPlot({
+      req(spilloverData(), spilloverData()$success)
+      
+      # Get font size from app settings
+      font_size <- app_state$plot_settings$font_size
+      
+      spillover_matrix <- spilloverData()$spillover_matrix
+      
+      # Use the utility function to create the heatmap
+      createSpilloverHeatmap(spillover_matrix, 
+                            title = "Spillover Matrix Heatmap", 
+                            font_size = font_size)
+    }, width = function() app_state$plot_settings$width,
+    height = function() app_state$plot_settings$height)
+    
+    # Plot before vs after compensation comparison
+    output$beforeAfterCompensationPlot <- renderPlot({
+      req(rawFCS(), spilloverData(), spilloverData()$success)
+      
+      # Get font size from app settings
+      font_size <- app_state$plot_settings$font_size
+      
+      tryCatch({
+        # Get a sample of data for visualization
+        fcs_data <- rawFCS()
+        if (!inherits(fcs_data, "flowFrame")) {
+          return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                   label = "Compensation comparison only available for FCS files") +
+                 theme_void())
+        }
+        
+        # Sample data for faster plotting
+        n_sample <- min(5000, nrow(fcs_data))
+        sample_indices <- sample(nrow(fcs_data), n_sample)
+        
+        # Get original data
+        original_data <- exprs(fcs_data)[sample_indices, ]
+        
+        # Apply compensation
+        comp_result <- applyCompensation(fcs_data, spilloverData()$spillover_matrix)
+        compensated_data <- exprs(comp_result$data)[sample_indices, ]
+        
+        # Get channels that are in the spillover matrix
+        common_channels <- intersect(colnames(original_data), colnames(spilloverData()$spillover_matrix))
+        
+        if (length(common_channels) >= 2) {
+          # Create comparison plot for first two channels
+          ch1 <- common_channels[1]
+          ch2 <- common_channels[2]
+          
+          # Use the utility function to create the comparison plot
+          createCompensationComparisonPlot(original_data, compensated_data, 
+                                         ch1, ch2, 
+                                         n_sample = n_sample, 
+                                         font_size = font_size)
+        } else {
+          ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                             label = "Not enough matching channels for comparison") +
+            theme_void()
+        }
+        
+      }, error = function(e) {
+        ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                           label = paste("Error creating comparison plot:", e$message)) +
+          theme_void()
+      })
+    }, width = function() app_state$plot_settings$width,
+    height = function() app_state$plot_settings$height)
+    
     # Apply live/dead gating threshold to the main analysis
     observeEvent(input$applyLiveDeadGating, {
       req(input$liveDeadMarkerSelect, input$liveDeadMarkerSelect != "None")
@@ -548,6 +994,12 @@ rawDataModuleServer <- function(id, app_state) {
           n_events = input$nEvents,
           perform_qc = isTRUE(input$performQC),
           perform_gating = isTRUE(input$performGating),
+          perform_compensation = isTRUE(input$enableCompensation),
+          spillover_matrix = if (isTRUE(input$enableCompensation) && !is.null(spilloverData()) && spilloverData()$success) {
+            spilloverData()$spillover_matrix
+          } else {
+            NULL
+          },
           scale_data = TRUE,
           seed = 123
         )
@@ -651,6 +1103,14 @@ rawDataModuleServer <- function(id, app_state) {
           results$pca_summary <- summary(pca_result)
         }
         
+        if ("MDS" %in% input$methods) {
+          incProgress(0.9, detail = "Running MDS...")
+          data_matrix <- as.matrix(preprocessing_results$scaled_data)
+          dist_matrix <- dist(data_matrix)
+          mds_result <- cmdscale(dist_matrix, k = 2)
+          results$mds <- data.frame(mds1 = mds_result[,1], mds2 = mds_result[,2])
+        }
+        
         # Create plot data
         plot_data <- as.data.frame(preprocessing_results$sampled_data)
         colnames(plot_data) <- input$selectedMarkers
@@ -678,6 +1138,10 @@ rawDataModuleServer <- function(id, app_state) {
             }
           }
         }
+        if (!is.null(results$mds)) {
+          plot_data$mds1 <- results$mds$mds1
+          plot_data$mds2 <- results$mds$mds2
+        }
         
         results$plot_data <- plot_data
         results$markers <- input$selectedMarkers
@@ -687,8 +1151,10 @@ rawDataModuleServer <- function(id, app_state) {
         if (!is.null(results$metrics)) {
           qc_removed <- round(results$metrics$qc$removed_pct * 100, 1)
           gating_removed <- round(results$metrics$gating$removed_pct * 100, 1)
+          compensation_applied <- results$metrics$compensation$applied
           
           msg <- paste0("Preprocessing complete: ", 
+                        if (compensation_applied) "Compensation applied, " else "",
                         qc_removed, "% removed in QC, ",
                         gating_removed, "% removed in gating. ",
                         "Analyzing ", nrow(results$sampled_data), " cells.")
@@ -798,6 +1264,30 @@ rawDataModuleServer <- function(id, app_state) {
         )
       }
       
+      if (!is.null(results$mds)) {
+        # Calculate MDS metrics if it was run
+        mds_data <- results$mds
+        
+        # Calculate a simple MDS stress or distance preservation metric
+        mds_stress <- tryCatch({
+          original_dist <- dist(scale(results$scaled_data))
+          embedding_dist <- dist(as.matrix(mds_data))
+          
+          # Normalize distances
+          original_dist <- original_dist / max(original_dist)
+          embedding_dist <- embedding_dist / max(embedding_dist)
+          
+          # Calculate mean squared error between distance matrices
+          mean((as.matrix(original_dist) - as.matrix(embedding_dist))^2)
+        }, error = function(e) NA)
+        
+        # Store MDS metrics
+        metrics$mds <- list(
+          stress = round(mds_stress, 4),
+          method = "Classical MDS"
+        )
+      }
+      
       # Create UI elements to display metrics
       metrics_ui <- tagList(
         hr(),
@@ -844,11 +1334,25 @@ rawDataModuleServer <- function(id, app_state) {
         )
       }
       
+      # Add MDS metrics if available
+      if (!is.null(metrics$mds)) {
+        metrics_ui <- tagAppendChildren(
+          metrics_ui,
+          div(
+            h5("MDS Metrics:"),
+            p(paste("Stress (distance error):", metrics$mds$stress, 
+                    "(lower is better)")),
+            p(paste("Method:", metrics$mds$method))
+          )
+        )
+      }
+      
       # Add recommendation if multiple methods are available
       available_methods <- c()
       if (!is.null(metrics$tsne)) available_methods <- c(available_methods, "t-SNE")
       if (!is.null(metrics$umap)) available_methods <- c(available_methods, "UMAP")
       if (!is.null(metrics$pca)) available_methods <- c(available_methods, "PCA")
+      if (!is.null(metrics$mds)) available_methods <- c(available_methods, "MDS")
       
       if (length(available_methods) > 1) {
         # Calculate simple scores for comparison
@@ -862,6 +1366,10 @@ rawDataModuleServer <- function(id, app_state) {
         }
         if (!is.null(metrics$pca)) {
           scores$pca <- min(metrics$pca$variance_explained, 1)  # Already in 0-1 range
+        }
+        if (!is.null(metrics$mds)) {
+          stress_scaled <- min(metrics$mds$stress / 0.2, 1)
+          scores$mds <- 1 - stress_scaled  # Higher score means better
         }
         
         # Find the best method
@@ -877,7 +1385,8 @@ rawDataModuleServer <- function(id, app_state) {
           rec_text <- paste0(rec_text, "\n\nMethod characteristics:\n",
                             "• t-SNE: Best for revealing local structure and clusters\n",
                             "• UMAP: Good balance of local and global structure\n",
-                            "• PCA: Linear method, preserves global distances, interpretable components")
+                            "• PCA: Linear method, preserves global distances, interpretable components\n",
+                            "• MDS: Preserves pairwise distances, good for visualizing overall geometry")
         }
         
         metrics_ui <- tagAppendChildren(
@@ -895,6 +1404,11 @@ rawDataModuleServer <- function(id, app_state) {
           metrics_ui,
           hr(),
           h4("Preprocessing Metrics"),
+          div(
+            h5("Compensation:"),
+            p(paste("Applied:", results$metrics$compensation$applied)),
+            p(paste("Status:", results$metrics$compensation$message))
+          ),
           div(
             h5("Quality Control:"),
             p(paste("Initial cells:", results$metrics$qc$initial_count)),
@@ -934,6 +1448,7 @@ rawDataModuleServer <- function(id, app_state) {
       session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("tsnePlot")))
       session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("umapPlot")))
       session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("pcaPlot")))
+      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("mdsPlot")))
     })
     
     # Render t-SNE plot
@@ -1290,6 +1805,116 @@ rawDataModuleServer <- function(id, app_state) {
       return(p_plotly)
     })
     
+    output$mdsPlot <- renderPlotly({
+      font_size <- app_state$plot_settings$font_size
+      point_size <- app_state$plot_settings$point_size
+      color_palette <- app_state$plot_settings$color_palette
+      width <- app_state$plot_settings$width
+      height <- app_state$plot_settings$height
+      
+      req(processedData(), "MDS" %in% input$methods)
+      plot_data <- processedData()$plot_data
+      req("mds1" %in% colnames(plot_data))
+      
+      plot_data_copy <- plot_data
+      
+      if (!is.null(clustering_results$clustering_results()) &&
+          clustering_results$showClusteringOptions()) {
+        plot_data_copy$Cluster <- as.factor(clustering_results$clustering_results()$cluster_ids)
+        color_by <- "Cluster"
+      } else {
+        color_by <- NULL
+      }
+      
+      p <- createDimReductionPlot(
+        plot_data = plot_data_copy,
+        dim1 = "mds1",
+        dim2 = "mds2",
+        colorBy = color_by,
+        color_palette = color_palette,
+        point_size = point_size,
+        font_size = font_size,
+        title = "MDS Projection",
+        xlab = "MDS 1",
+        ylab = "MDS 2"
+      )
+      
+      p_plotly <- ggplotly(p, width = width, height = height)
+      
+      p_plotly <- p_plotly %>% layout(
+        font = list(
+          family = "Arial",
+          size = font_size,
+          color = "black"
+        ),
+        title = list(
+          text = "MDS Projection",
+          font = list(
+            family = "Arial",
+            size = font_size * 1.2,
+            color = "black"
+          )
+        ),
+        xaxis = list(
+          title = list(
+            text = "MDS 1",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          ),
+          scaleanchor = "y",
+          scaleratio = 1
+        ),
+        yaxis = list(
+          title = list(
+            text = "MDS 2",
+            font = list(
+              family = "Arial",
+              size = font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = font_size
+          )
+        ),
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9
+          )
+        ),
+        legend = if (!is.null(color_by)) list(
+          title = list(
+            text = "Cluster",
+            font = list(
+              family = "Arial",
+              size = font_size,
+              color = "black"
+            )
+          ),
+          font = list(
+            family = "Arial",
+            size = font_size * 0.9,
+            color = "black"
+          ),
+          bgcolor = "rgba(255, 255, 255, 0.9)",
+          bordercolor = "rgba(0, 0, 0, 0.2)",
+          borderwidth = 1
+        ) else list()
+      )
+      
+      return(p_plotly)
+    })
+    
     # Cluster visualization in dedicated tab
     output$clusterPlot <- renderPlotly({
       # Explicitly track app_state$plot_settings to make this plot reactive to font changes
@@ -1354,6 +1979,10 @@ rawDataModuleServer <- function(id, app_state) {
         dim1 <- "pca1"
         dim2 <- "pca2"
         dim_labels <- c("PC 1", "PC 2")
+      } else if ("mds1" %in% colnames(plot_data)) {
+        dim1 <- "mds1"
+        dim2 <- "mds2"
+        dim_labels <- c("MDS 1", "MDS 2")
       } else {
         # Fallback to first two markers if no dimension reduction available
         dim1 <- input$selectedMarkers[1]

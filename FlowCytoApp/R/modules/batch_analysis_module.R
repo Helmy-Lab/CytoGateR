@@ -63,7 +63,7 @@ batchAnalysisModuleUI <- function(id) {
       # Dimensionality Reduction
       h5("Dimensionality Reduction"),
       selectInput(ns("batchDimRedMethod"), "Method", 
-                  choices = c("t-SNE", "UMAP", "PCA"), selected = "t-SNE"),
+                  choices = c("t-SNE", "UMAP", "PCA", "MDS"), selected = "t-SNE"),
       conditionalPanel(
         condition = paste0("input['", ns("batchDimRedMethod"), "'] === 't-SNE'"),
         sliderInput(ns("batchPerplexity"), "t-SNE perplexity", min = 5, max = 50, value = 30),
@@ -88,6 +88,12 @@ batchAnalysisModuleUI <- function(id) {
       conditionalPanel(
         condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'PCA'"),
         numericInput(ns("batchPcaComponents"), "PCA: Number of Components", value = 2, min = 2, max = 10)
+      ),
+      
+      conditionalPanel(
+        condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'MDS'"),
+        tags$p("MDS does not require additional parameters. It uses Euclidean distances by default."),
+        tags$small("Note: MDS can be slow for large datasets.")
       ),
       
       # Add clustering controls
@@ -673,6 +679,17 @@ batchAnalysisModuleServer <- function(id, app_state) {
                   reduced_data[[paste0("PC", i)]] <- pca_result$x[, i]
                 }
               }
+            } else if (input$batchDimRedMethod == "MDS") {
+              # Run MDS
+              incProgress(0.1, detail = "Running MDS...")
+              data_matrix <- as.matrix(preprocess_results$scaled_data)
+              
+              # Compute distance matrix and MDS
+              dist_matrix <- dist(data_matrix)
+              mds_result <- cmdscale(dist_matrix, k = 2)
+              
+              # Store MDS results in dim1 and dim2
+              reduced_data <- data.frame(dim1 = mds_result[,1], dim2 = mds_result[,2])
             }
             
             # Create plot data

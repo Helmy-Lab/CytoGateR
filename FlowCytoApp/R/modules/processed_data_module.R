@@ -13,7 +13,7 @@ processedDataModuleUI <- function(id) {
       uiOutput(ns("marker_ui")),
       uiOutput(ns("treatment_ui")),
       selectInput(ns("dimred_method"), "Dimensionality Reduction Method", 
-                  choices = c("t-SNE", "UMAP", "PCA"), selected = "t-SNE"),
+                  choices = c("t-SNE", "UMAP", "PCA", "MDS"), selected = "t-SNE"),
       conditionalPanel(
         condition = paste0("input['", ns("dimred_method"), "'] === 't-SNE'"),
         numericInput(ns("perplexity_cleaned"), "t-SNE: Perplexity", value = 5, min = 2, max = 50)
@@ -27,6 +27,11 @@ processedDataModuleUI <- function(id) {
         condition = paste0("input['", ns("dimred_method"), "'] === 'PCA'"),
         numericInput(ns("pca_components"), "PCA: Number of Components", value = 2, min = 2, max = 10)
       ),
+      conditionalPanel(
+        condition = paste0("input['", ns("dimred_method"), "'] === 'MDS'"),
+        tags$p("MDS does not require additional parameters. It uses Euclidean distances by default."),
+        tags$small("Note: MDS can be slow for large datasets.")
+      ),
       numericInput(ns("n_clusters"), "Number of Clusters (k-means)", value = 3, min = 1),
       sliderInput(ns("plot_width"), "Plot Width (px)", min = 300, max = 1200, value = 600, step = 50),
       sliderInput(ns("plot_height"), "Plot Height (px)", min = 300, max = 1200, value = 600, step = 50),
@@ -37,7 +42,7 @@ processedDataModuleUI <- function(id) {
         tabPanel("Data Preview", DT::DTOutput(ns("preview"))),
         tabPanel("Structure Detection", verbatimTextOutput(ns("structure"))),
         tabPanel("Results Plot", plotlyOutput(ns("plot"))),
-        tabPanel("t-SNE / UMAP / PCA", plotlyOutput(ns("dimred_plot"), width = "auto", height = "auto")),
+        tabPanel("t-SNE / UMAP / PCA / MDS", plotlyOutput(ns("dimred_plot"), width = "auto", height = "auto")),
         tabPanel("Summary Table", DT::DTOutput(ns("summary_table")))
       )
     )
@@ -177,6 +182,11 @@ processedDataModuleServer <- function(id, app_state) {
           # Run PCA
           pca_result <- prcomp(df_sel, scale. = TRUE)
           dimred <- pca_result$x[, 1:input$pca_components]
+        } else if (input$dimred_method == "MDS") {
+          # Run MDS (classical)
+          dist_matrix <- dist(df_sel)  # Euclidean distance by default
+          mds_result <- cmdscale(dist_matrix, k = 2)  # 2D projection
+          dimred <- mds_result
         }
         
         # Run clustering
@@ -226,7 +236,7 @@ processedDataModuleServer <- function(id, app_state) {
       # Create comparison plot based on analysis type
       if (input$analysis_type == "Marker Comparison") {
         # Create box plot of marker values by treatment
-        p <- ggplot(results$long_data, aes_string(x = "Marker", y = "Value", fill = results$treatment_column)) +
+        p <- ggplot(results$long_data, aes(x = .data[["Marker"]], y = .data[["Value"]], fill = .data[[results$treatment_column]])) +
           geom_boxplot(alpha = 0.7) +
           theme_minimal(base_size = settings$font_size) +
           theme(
@@ -240,7 +250,7 @@ processedDataModuleServer <- function(id, app_state) {
           )
       } else if (input$analysis_type == "Treatment Comparison") {
         # Create scatter plot of treatment groups
-        p <- ggplot(results$long_data, aes_string(x = results$treatment_column, y = "Value", color = "Marker")) +
+        p <- ggplot(results$long_data, aes(x = .data[[results$treatment_column]], y = .data[["Value"]], color = .data[["Marker"]])) +
           geom_point(position = position_jitter(width = 0.2), alpha = 0.7, size = settings$point_size/2) +
           theme_minimal(base_size = settings$font_size) +
           theme(

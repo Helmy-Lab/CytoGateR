@@ -1,5 +1,122 @@
 # Preprocessing utility functions for Flow Cytometry Analysis
 
+# Spillover compensation functions
+computeSpilloverMatrix <- function(control_files, marker_assignments, unstained_file_path, unstained_file_name) {
+  # control_files: named list of file paths
+  # marker_assignments: named vector mapping file names to marker names
+  # unstained_file_path: path to unstained control file
+  # unstained_file_name: name of unstained control file
+  
+  tryCatch({
+    # Load control files
+    control_flowframes <- list()
+    
+    for (file_name in names(control_files)) {
+      file_path <- control_files[[file_name]]
+      if (file_name %in% names(marker_assignments)) {
+        marker_name <- marker_assignments[[file_name]]
+        control_flowframes[[marker_name]] <- read.FCS(file_path, transformation = FALSE)
+      }
+    }
+    
+    # Load unstained control
+    unstained_flowframe <- read.FCS(unstained_file_path, transformation = FALSE)
+    control_flowframes[["unstained"]] <- unstained_flowframe
+    
+    # Create flowSet from control files
+    if (length(control_flowframes) < 3) {  # At least 2 stains + 1 unstained
+      stop("At least 2 single-stain controls plus 1 unstained control are required for spillover computation")
+    }
+    
+    # Convert to flowSet
+    control_set <- flowSet(control_flowframes)
+    
+    # Compute spillover matrix using flowStats
+    spillover_matrix <- spillover(control_set, 
+                                unstained = "unstained",  # Use the unstained control
+                                patt = ".*",              # Pattern to match all markers
+                                method = "median") 
+    
+    return(list(
+      spillover_matrix = spillover_matrix,
+      control_files = names(control_flowframes),
+      success = TRUE,
+      message = paste("Spillover matrix computed successfully using", length(control_flowframes) - 1, "single-stain controls and 1 unstained control")
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      spillover_matrix = NULL,
+      success = FALSE,
+      message = paste("Error computing spillover matrix:", e$message)
+    ))
+  })
+}
+
+# Function to apply compensation to flow data
+applyCompensation <- function(flow_data, spillover_matrix) {
+  if (is.null(spillover_matrix)) {
+    return(list(
+      data = flow_data,
+      compensated = FALSE,
+      message = "No spillover matrix provided"
+    ))
+  }
+  
+  tryCatch({
+    # Create compensation object
+    comp_obj <- compensation(spillover_matrix)
+    
+    # Apply compensation
+    compensated_data <- compensate(flow_data, comp_obj)
+    
+    return(list(
+      data = compensated_data,
+      compensated = TRUE,
+      message = "Compensation applied successfully"
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      data = flow_data,
+      compensated = FALSE,
+      message = paste("Error applying compensation:", e$message)
+    ))
+  })
+}
+
+# Function to validate spillover matrix
+validateSpilloverMatrix <- function(spillover_matrix, flow_data_channels) {
+  if (is.null(spillover_matrix)) {
+    return(list(valid = FALSE, message = "No spillover matrix provided"))
+  }
+  
+  # Check if matrix is square
+  if (nrow(spillover_matrix) != ncol(spillover_matrix)) {
+    return(list(valid = FALSE, message = "Spillover matrix must be square"))
+  }
+  
+  # Check if diagonal elements are close to 1
+  diag_elements <- diag(spillover_matrix)
+  if (any(abs(diag_elements - 1) > 0.1)) {
+    return(list(valid = FALSE, message = "Diagonal elements should be close to 1"))
+  }
+  
+  # Check if channel names match
+  matrix_channels <- colnames(spillover_matrix)
+  matching_channels <- intersect(matrix_channels, flow_data_channels)
+  
+  if (length(matching_channels) < 2) {
+    return(list(valid = FALSE, message = "Not enough matching channels between matrix and data"))
+  }
+  
+  return(list(
+    valid = TRUE, 
+    message = paste("Matrix valid for", length(matching_channels), "channels"),
+    matching_channels = matching_channels
+  ))
+}
+
 # Data loading function
 loadFlowData <- function(file_path, file_name) {
   ext <- tools::file_ext(file_name)
@@ -243,6 +360,8 @@ preprocessFlowData <- function(input_data, preprocessing_params = list()) {
     n_events = 5000,
     perform_qc = TRUE,
     perform_gating = TRUE,
+    perform_compensation = FALSE,
+    spillover_matrix = NULL,
     scale_data = TRUE,
     qc_settings = list(),
     gates = list(),
@@ -263,16 +382,35 @@ preprocessFlowData <- function(input_data, preprocessing_params = list()) {
     metrics = list()
   )
   
-  # Step 1: Quality Control
+  # Step 1: Compensation (applied first, before QC and gating)
+  if (params$perform_compensation && !is.null(params$spillover_matrix)) {
+    compensation_result <- applyCompensation(input_data, params$spillover_matrix)
+    results$compensated_data <- compensation_result$data
+    results$metrics$compensation <- list(
+      applied = compensation_result$compensated,
+      message = compensation_result$message
+    )
+    # Use compensated data for subsequent steps
+    current_data <- results$compensated_data
+  } else {
+    results$compensated_data <- input_data
+    results$metrics$compensation <- list(
+      applied = FALSE,
+      message = "Compensation not requested or no spillover matrix provided"
+    )
+    current_data <- input_data
+  }
+  
+  # Step 2: Quality Control
   if (params$perform_qc) {
-    qc_result <- performQC(input_data, params$qc_settings)
+    qc_result <- performQC(current_data, params$qc_settings)
     results$qc_data <- qc_result$data
     results$metrics$qc <- qc_result$metrics
   } else {
-    results$qc_data <- input_data
+    results$qc_data <- current_data
   }
   
-  # Step 2: Gating
+  # Step 3: Gating
   if (params$perform_gating) {
     gating_result <- performGating(results$qc_data, params$gates)
     results$gated_data <- gating_result$data
@@ -281,7 +419,7 @@ preprocessFlowData <- function(input_data, preprocessing_params = list()) {
     results$gated_data <- results$qc_data
   }
   
-  # Step 3: Transform data
+  # Step 4: Transform data
   transformed_data <- transformData(
     results$gated_data, 
     params$markers, 
@@ -290,12 +428,12 @@ preprocessFlowData <- function(input_data, preprocessing_params = list()) {
   )
   results$transformed_data <- transformed_data
   
-  # Step 4: Sample cells
+  # Step 5: Sample cells
   sampled_result <- sampleCells(transformed_data, params$n_events, params$seed)
   results$sampled_data <- sampled_result$data
   results$sampled_indices <- sampled_result$indices
   
-  # Step 5: Scale data
+  # Step 6: Scale data
   if (params$scale_data) {
     results$scaled_data <- scale(results$sampled_data)
   } else {

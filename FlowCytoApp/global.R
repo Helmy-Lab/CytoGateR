@@ -3,6 +3,8 @@
 
 # Load required libraries
 library(shiny)
+library(shinydashboard)  # For dashboard components
+library(shinyjs)  # For JavaScript functionality
 library(flowCore)
 library(ggplot2)
 library(Rtsne)
@@ -18,6 +20,7 @@ library(openxlsx)
 library(shinythemes)
 library(shinyWidgets)
 library(cluster)
+library(tools)  # For file path utilities
 # libraries for clustering
 library(dbscan)
 library(FlowSOM)
@@ -26,9 +29,14 @@ library(igraph)
 # Flow-specific libraries
 library(flowAI)
 library(flowDensity)
+library(flowStats)  # For spillover compensation
 suppressPackageStartupMessages(library(openCyto))
 suppressPackageStartupMessages(library(flowClust))
+suppressPackageStartupMessages(library(flowWorkspace))  # For GatingSet functionality
+suppressPackageStartupMessages(library(ggcyto))  # For ggplot2-based flow cytometry plotting
 library(flowMatch)
+library(MASS)  # For density estimation in gating
+library(gridExtra)  # For arranging multiple plots
 
 # Set global options
 options(shiny.maxRequestSize = 250*1024^2)
