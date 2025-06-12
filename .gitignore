@@ -157,3 +157,7 @@ test/resultsQC/QCmini.txt
 Flow data for Bioinformatics.csv
 Flow data for Bioinformatics.xlsx
 flowcyto_samples_20250424_032649.csv
+FlowCytoApp/R/modules/batch_analysis_module - mds added.R
+FlowCytoApp/R/modules/processed_data_module - mds added.R
+FlowCytoApp/R/modules/raw_data_module - mds added.R
+FlowCytoApp/R/modules/visualization_module - mds added.R
