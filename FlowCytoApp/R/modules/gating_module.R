@@ -43,12 +43,6 @@ gatingModuleUI <- function(id) {
           border-radius: 5px;
           margin: 5px 0;
         }
-        .boolean-builder {
-          background-color: #fff3e0;
-          padding: 10px;
-          border-radius: 5px;
-          border: 1px solid #ffcc02;
-        }
       "))
     ),
     
@@ -185,40 +179,16 @@ gatingModuleUI <- function(id) {
                          icon = icon("edit")),
             actionButton(ns("delete_gate"), "Delete Selected Gate", 
                          class = "btn-danger gate-button",
-                         icon = icon("trash"))
+                         icon = icon("trash")),
+          br(),
+          actionButton(ns("refresh_hierarchy"), "Refresh Display", 
+                       class = "btn-info gate-button",
+                       icon = icon("refresh"),
+                       title = "Force refresh of population display")
           )
         ),
         
-        # Boolean Gate Builder
-        shinydashboard::box(
-          title = "Boolean Gates", status = "warning", solidHeader = TRUE,
-          width = 12, collapsible = TRUE, collapsed = TRUE,
-          
-          div(class = "boolean-builder",
-            h5(icon("code-branch"), "Boolean Logic Builder"),
-            helpText("Create complex populations using AND (&), OR (|), NOT (!) logic"),
-            
-            selectInput(ns("bool_populations"), "Select Populations:",
-                        choices = NULL, multiple = TRUE),
-            
-            selectInput(ns("bool_operator"), "Logic Operator:",
-                        choices = list(
-                          "AND (&)" = "&",
-                          "OR (|)" = "|", 
-                          "NOT (!)" = "!"
-                        )),
-            
-            textInput(ns("bool_expression"), "Boolean Expression:",
-                      placeholder = "e.g., CD3+ & CD4+ & !CD8+"),
-            
-            textInput(ns("bool_name"), "Boolean Population Name:",
-                      placeholder = "e.g., CD3+CD4+CD8-"),
-            
-            actionButton(ns("create_boolean"), "Create Boolean Gate",
-                         class = "btn-warning",
-                         icon = icon("plus-circle"))
-          )
-        )
+
       ),
       
       # Center Panel - Enhanced Plot Area
@@ -229,24 +199,70 @@ gatingModuleUI <- function(id) {
           
           # Plot Controls
           fluidRow(
-            column(6,
+            column(4,
               selectInput(ns("plot_type"), "Plot Type:",
                           choices = list(
                             "Scatter Plot" = "scatter",
-                            "Density Plot" = "density", 
+                            "Colored Scatter" = "scatter_colored",
                             "Contour Plot" = "contour",
                             "Hexagon Plot" = "hex"
                           ),
-                          selected = "scatter")
+                          selected = "scatter_colored")
             ),
-            column(6,
+            column(4,
+              selectInput(ns("color_channel"), "Color Channel:",
+                          choices = NULL,
+                          selected = NULL)
+            ),
+            column(4,
               numericInput(ns("point_size"), "Point Size:", 
                            value = 0.5, min = 0.1, max = 2, step = 0.1)
             )
           ),
           
-          # Main Plot Output
-          plotlyOutput(ns("main_plot"), height = "500px"),
+          # Additional Color Options
+          fluidRow(
+            column(6,
+              selectInput(ns("color_scale"), "Color Scale:",
+                          choices = list(
+                            "Viridis (Purple-Blue-Green-Yellow)" = "viridis",
+                            "Plasma (Purple-Pink-Yellow)" = "plasma",
+                            "Inferno (Black-Red-Yellow)" = "inferno",
+                            "Magma (Black-Purple-White)" = "magma",
+                            "Rainbow" = "rainbow",
+                            "Heat" = "heat",
+                            "Spectral" = "spectral"
+                          ),
+                          selected = "viridis")
+            ),
+            column(6,
+              sliderInput(ns("alpha_level"), "Transparency:",
+                          min = 0.1, max = 1.0, value = 0.6, step = 0.1)
+            )
+          ),
+          
+          # Plot Dimensions Control
+          fluidRow(
+            column(3,
+              numericInput(ns("plot_width"), "Width (px):",
+                           value = 600, min = 300, max = 1200, step = 50)
+            ),
+            column(3,
+              numericInput(ns("plot_height"), "Height (px):",
+                           value = 500, min = 300, max = 1200, step = 50)
+            ),
+            column(3,
+              checkboxInput(ns("lock_aspect"), "Lock Square (1:1)", value = FALSE)
+            ),
+            column(3,
+              actionButton(ns("reset_dimensions"), "Reset Size",
+                           class = "btn-outline-secondary btn-sm",
+                           style = "margin-top: 25px;")
+            )
+          ),
+          
+          # Main Plot Output (dynamic height controlled by user inputs)
+          uiOutput(ns("dynamic_plot_container")),
           
           # Plot Status and Instructions
           div(id = ns("plot_instructions"), class = "alert alert-info",
@@ -580,6 +596,12 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
         updateSelectInput(session, "x_channel", choices = all_channels)
         updateSelectInput(session, "y_channel", choices = all_channels)
         
+        # Update color channel choices - prioritize fluorescent channels for coloring
+        color_channel_choices <- c("None (Density-based)" = "density", all_channels)
+        updateSelectInput(session, "color_channel", 
+                          choices = color_channel_choices,
+                          selected = "density")  # Default to density to avoid scale errors
+        
         # Initialize hierarchy trigger
         values$hierarchy_trigger <- 1
         
@@ -604,6 +626,55 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
     })
     outputOptions(output, "data_status", suspendWhenHidden = FALSE)
     
+    # Plot dimension controls
+    observeEvent(input$lock_aspect, {
+      if (input$lock_aspect) {
+        # When locking aspect ratio, make height match width
+        updateNumericInput(session, "plot_height", value = input$plot_width)
+      }
+    })
+    
+    # Sync height to width when aspect is locked
+    observeEvent(input$plot_width, {
+      if (!is.null(input$lock_aspect) && input$lock_aspect) {
+        updateNumericInput(session, "plot_height", value = input$plot_width)
+      }
+    })
+    
+    # Sync width to height when aspect is locked  
+    observeEvent(input$plot_height, {
+      if (!is.null(input$lock_aspect) && input$lock_aspect) {
+        updateNumericInput(session, "plot_width", value = input$plot_height)
+      }
+    })
+    
+    # Reset dimensions button
+    observeEvent(input$reset_dimensions, {
+      updateNumericInput(session, "plot_width", value = 600)
+      updateNumericInput(session, "plot_height", value = 500)
+      updateCheckboxInput(session, "lock_aspect", value = FALSE)
+      showNotification("Plot dimensions reset to default", type = "message")
+    })
+    
+    # Dynamic plot container with custom dimensions
+    output$dynamic_plot_container <- renderUI({
+      # Use default values if inputs not available yet, with validation
+      plot_width <- if (!is.null(input$plot_width)) {
+        max(300, min(1200, input$plot_width))  # Clamp between 300-1200
+      } else {
+        600
+      }
+      plot_height <- if (!is.null(input$plot_height)) {
+        max(300, min(1200, input$plot_height))  # Clamp between 300-1200
+      } else {
+        500
+      }
+      
+      plotlyOutput(ns("main_plot"), 
+                   width = paste0(plot_width, "px"),
+                   height = paste0(plot_height, "px"))
+    })
+    
     # Update parent population choices based on current hierarchy
     observe({
       req(values$current_gs)
@@ -611,8 +682,36 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
       values$hierarchy_trigger
       
       tryCatch({
-        nodes <- gs_get_pop_paths(values$current_gs, path = "auto")
-        pop_counts <- gs_pop_get_count_fast(values$current_gs)
+        # Get population paths with error handling
+        nodes <- tryCatch({
+          gs_get_pop_paths(values$current_gs, path = "auto")
+        }, error = function(e) {
+          message("Error getting population paths in observe: ", e$message)
+          return(c("root"))
+        })
+        
+        # Get population counts with error handling
+        pop_counts <- tryCatch({
+          gs_pop_get_count_fast(values$current_gs)
+        }, error = function(e) {
+          message("Error getting population counts in observe: ", e$message)
+          # Try alternative method
+          tryCatch({
+            stats <- gs_pop_get_stats(values$current_gs)
+            data.frame(
+              Population = stats$pop,
+              Count = stats$Count,
+              stringsAsFactors = FALSE
+            )
+          }, error = function(e2) {
+            message("Error with alternative method in observe: ", e2$message)
+            data.frame(
+              Population = nodes,
+              Count = rep(0, length(nodes)),
+              stringsAsFactors = FALSE
+            )
+          })
+        })
         
         # Validate data
         if (is.null(nodes) || length(nodes) == 0 || 
@@ -646,6 +745,98 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
                           selected = "root")
       })
     })
+    
+    # Helper function to get color scales with automatic discrete/continuous detection
+    getColorScale <- function(scale_name, type = "color", name = "Value", data_values = NULL, force_discrete = FALSE) {
+      # Determine if data is discrete or continuous
+      is_continuous <- TRUE
+      
+      # Force discrete if requested (for density contours)
+      if (force_discrete) {
+        is_continuous <- FALSE
+      } else if (!is.null(data_values) && length(data_values) > 0) {
+        # Check if data is numeric and has reasonable range for continuous scale
+        if (is.numeric(data_values)) {
+          # Remove NA values for analysis
+          clean_data <- data_values[!is.na(data_values) & is.finite(data_values)]
+          if (length(clean_data) > 0) {
+            unique_vals <- length(unique(clean_data))
+            # If fewer than 10 unique values, treat as discrete
+            is_continuous <- unique_vals >= 10
+          } else {
+            # If no valid data, default to continuous
+            is_continuous <- TRUE
+          }
+        } else {
+          # Non-numeric data is always discrete
+          is_continuous <- FALSE
+        }
+      }
+      
+      if (type == "color") {
+        if (is_continuous) {
+          switch(scale_name,
+            "viridis" = scale_color_viridis_c(name = name),
+            "plasma" = scale_color_viridis_c(option = "plasma", name = name),
+            "inferno" = scale_color_viridis_c(option = "inferno", name = name),
+            "magma" = scale_color_viridis_c(option = "magma", name = name),
+            "rainbow" = scale_color_gradientn(colors = rainbow(7), name = name),
+            "heat" = scale_color_gradientn(colors = heat.colors(7), name = name),
+            "spectral" = scale_color_distiller(palette = "Spectral", name = name),
+            scale_color_viridis_c(name = name)  # default
+          )
+        } else {
+          # For discrete scales, calculate number of unique values safely
+          n_unique <- if (!is.null(data_values) && length(data_values) > 0) {
+            length(unique(data_values[!is.na(data_values)]))
+          } else {
+            6  # Default number of colors
+          }
+          
+          switch(scale_name,
+            "viridis" = scale_color_viridis_d(name = name),
+            "plasma" = scale_color_viridis_d(option = "plasma", name = name),
+            "inferno" = scale_color_viridis_d(option = "inferno", name = name),
+            "magma" = scale_color_viridis_d(option = "magma", name = name),
+            "rainbow" = scale_color_manual(values = rainbow(n_unique), name = name),
+            "heat" = scale_color_manual(values = heat.colors(n_unique), name = name),
+            "spectral" = if(n_unique <= 11) scale_color_brewer(palette = "Spectral", name = name) else scale_color_viridis_d(name = name),
+            scale_color_viridis_d(name = name)  # default
+          )
+        }
+      } else {  # fill
+        if (is_continuous) {
+          switch(scale_name,
+            "viridis" = scale_fill_viridis_c(name = name),
+            "plasma" = scale_fill_viridis_c(option = "plasma", name = name),
+            "inferno" = scale_fill_viridis_c(option = "inferno", name = name),
+            "magma" = scale_fill_viridis_c(option = "magma", name = name),
+            "rainbow" = scale_fill_gradientn(colors = rainbow(7), name = name),
+            "heat" = scale_fill_gradientn(colors = heat.colors(7), name = name),
+            "spectral" = scale_fill_distiller(palette = "Spectral", name = name),
+            scale_fill_viridis_c(name = name)  # default
+          )
+        } else {
+          # For discrete scales, calculate number of unique values safely
+          n_unique <- if (!is.null(data_values) && length(data_values) > 0) {
+            length(unique(data_values[!is.na(data_values)]))
+          } else {
+            6  # Default number of colors
+          }
+          
+          switch(scale_name,
+            "viridis" = scale_fill_viridis_d(name = name),
+            "plasma" = scale_fill_viridis_d(option = "plasma", name = name),
+            "inferno" = scale_fill_viridis_d(option = "inferno", name = name),
+            "magma" = scale_fill_viridis_d(option = "magma", name = name),
+            "rainbow" = scale_fill_manual(values = rainbow(n_unique), name = name),
+            "heat" = scale_fill_manual(values = heat.colors(n_unique), name = name),
+            "spectral" = if(n_unique <= 11) scale_fill_brewer(palette = "Spectral", name = name) else scale_fill_viridis_d(name = name),
+            scale_fill_viridis_d(name = name)  # default
+          )
+        }
+      }
+    }
     
     # Main gating plot
     output$main_plot <- renderPlotly({
@@ -711,9 +902,24 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
         
         # Create base plot using display data but with full data limits
         if (!is.null(input$y_channel) && input$y_channel != "") {
-          # 2D plot
-          p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]], y = .data[[input$y_channel]])) +
-            theme_minimal() +
+          # 2D plot with enhanced color mapping
+          
+          # Determine color aesthetic
+          if (!is.null(input$color_channel) && input$color_channel != "density" && 
+              input$color_channel %in% names(plot_data_for_display)) {
+            # Color by specific channel
+            p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]], 
+                                                   y = .data[[input$y_channel]], 
+                                                   color = .data[[input$color_channel]]))
+            color_legend_title <- input$color_channel
+          } else {
+            # Color by density or no specific channel
+            p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]], 
+                                                   y = .data[[input$y_channel]]))
+            color_legend_title <- "Density"
+          }
+          
+          p <- p + theme_minimal() +
             labs(title = paste("Sample:", input$sample_select, "| Parent:", input$parent_population, 
                               "| Display:", format(nrow(plot_data_for_display), big.mark = ","), "of", 
                               format(nrow(values$full_population_data), big.mark = ","), "events")) +
@@ -721,25 +927,82 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
             xlim(x_limits) +
             ylim(y_limits)
           
-          # Add plot type specific geometry
+          # Add plot type specific geometry with enhanced colors
           if (input$plot_type == "scatter") {
-            p <- p + geom_point(alpha = 0.6, size = input$point_size)
-          } else if (input$plot_type == "density") {
-            p <- p + stat_density_2d_filled(alpha = 0.7) +
-              scale_fill_viridis_d()
+            # Basic scatter plot without specific coloring
+            p <- p + geom_point(alpha = input$alpha_level, size = input$point_size, color = "steelblue")
+            
+          } else if (input$plot_type == "scatter_colored") {
+            if (!is.null(input$color_channel) && input$color_channel != "density" && 
+                input$color_channel %in% names(plot_data_for_display)) {
+              # Color by specific channel
+              color_data <- plot_data_for_display[[input$color_channel]]
+              p <- p + geom_point(alpha = input$alpha_level, size = input$point_size) +
+                getColorScale(input$color_scale, type = "color", name = color_legend_title, data_values = color_data)
+            } else {
+              # Color by density using stat_density_2d with points
+              p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]], 
+                                                     y = .data[[input$y_channel]])) +
+                theme_minimal() +
+                labs(title = paste("Sample:", input$sample_select, "| Parent:", input$parent_population, 
+                                  "| Display:", format(nrow(plot_data_for_display), big.mark = ","), "of", 
+                                  format(nrow(values$full_population_data), big.mark = ","), "events")) +
+                xlim(x_limits) + ylim(y_limits) +
+                stat_density_2d_filled(alpha = input$alpha_level, contour_var = "ndensity") +
+                getColorScale(input$color_scale, type = "fill", name = "Density", data_values = NULL, force_discrete = TRUE)
+            }
+            
           } else if (input$plot_type == "contour") {
-            p <- p + geom_point(alpha = 0.3, size = input$point_size) +
-              stat_density_2d(color = "red")
+            if (!is.null(input$color_channel) && input$color_channel != "density" && 
+                input$color_channel %in% names(plot_data_for_display)) {
+              # Colored points with contour overlay
+              color_data <- plot_data_for_display[[input$color_channel]]
+              p <- p + geom_point(alpha = input$alpha_level, size = input$point_size) +
+                stat_density_2d(color = "white", size = 1.2, alpha = 0.8) +
+                getColorScale(input$color_scale, type = "color", name = color_legend_title, data_values = color_data)
+            } else {
+              # Basic contour with density-colored points - create clean ggplot
+              p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]], 
+                                                     y = .data[[input$y_channel]])) +
+                theme_minimal() +
+                labs(title = paste("Sample:", input$sample_select, "| Parent:", input$parent_population, 
+                                  "| Display:", format(nrow(plot_data_for_display), big.mark = ","), "of", 
+                                  format(nrow(values$full_population_data), big.mark = ","), "events")) +
+                xlim(x_limits) + ylim(y_limits) +
+                stat_density_2d_filled(alpha = 0.3) +
+                stat_density_2d(color = "red", size = 1) +
+                getColorScale(input$color_scale, type = "fill", name = "Density", data_values = NULL, force_discrete = TRUE)
+            }
+            
           } else if (input$plot_type == "hex") {
-            p <- p + geom_hex() +
-              scale_fill_viridis_c()
+            p <- p + geom_hex(alpha = input$alpha_level) +
+              getColorScale(input$color_scale, type = "fill", name = "Count", data_values = NULL)
           }
           
         } else {
-          # 1D histogram
-          p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]])) +
-            geom_histogram(bins = 50, alpha = 0.7, fill = "steelblue") +
-            theme_minimal() +
+          # Enhanced 1D histogram with color options
+          if (!is.null(input$color_channel) && input$color_channel != "density" && 
+              input$color_channel %in% names(plot_data_for_display)) {
+            # Color histogram by channel values
+            color_data <- plot_data_for_display[[input$color_channel]]
+            p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]], 
+                                                   fill = .data[[input$color_channel]])) +
+              geom_histogram(bins = 50, alpha = input$alpha_level, position = "identity") +
+              getColorScale(input$color_scale, type = "fill", name = input$color_channel, data_values = color_data)
+          } else {
+            # Standard single-color histogram
+            color_value <- switch(input$color_scale,
+              "viridis" = "#440154",
+              "plasma" = "#0D0887", 
+              "inferno" = "#000004",
+              "magma" = "#000004",
+              "steelblue"
+            )
+            p <- ggplot(plot_data_for_display, aes(x = .data[[input$x_channel]])) +
+              geom_histogram(bins = 50, alpha = input$alpha_level, fill = color_value)
+          }
+          
+          p <- p + theme_minimal() +
             labs(title = paste("Sample:", input$sample_select, "| Parent:", input$parent_population,
                               "| Display:", format(nrow(plot_data_for_display), big.mark = ","), "of", 
                               format(nrow(values$full_population_data), big.mark = ","), "events"),
@@ -754,6 +1017,19 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
                                 input$x_channel, input$y_channel)
         }
         
+        # Get plot dimensions with validation
+        plot_width <- if (!is.null(input$plot_width)) {
+          max(300, min(1200, input$plot_width))  # Clamp between 300-1200
+        } else {
+          600
+        }
+        plot_height <- if (!is.null(input$plot_height)) {
+          max(300, min(1200, input$plot_height))  # Clamp between 300-1200
+        } else {
+          500
+        }
+        lock_aspect <- if (!is.null(input$lock_aspect)) input$lock_aspect else FALSE
+        
         # Convert to plotly with proper configuration for interactive gating
         p_plotly <- ggplotly(p, source = "gating_plot") %>%
           config(
@@ -765,7 +1041,21 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
           layout(
             dragmode = "select",  # Enable selection by default
             selectdirection = "any",
-            hovermode = "closest"
+            hovermode = "closest",
+            width = plot_width,
+            height = plot_height,
+            # Handle aspect ratio for square plots
+            xaxis = if (lock_aspect) {
+              list(
+                scaleanchor = "y",
+                scaleratio = 1,
+                constraintoward = "center"
+              )
+            } else {
+              list()
+            },
+            # Add margin to prevent label cutoff
+            margin = list(l = 60, r = 40, t = 80, b = 60)
           )
         
         # Register events as required by current plotly version
@@ -1036,65 +1326,122 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
               message("  - ", pre_pop_counts$Population[i], ": ", pre_pop_counts$Count[i], " events")
             }
             
-            # Add the gate
-            gs_pop_add(values$current_gs, gate_result, 
-                       parent = input$parent_population,
-                       name = input$population_name)
-            message("  - Gate added to GatingSet successfully")
+            # Add the gate with proper error handling
+            tryCatch({
+              gs_pop_add(values$current_gs, gate_result, 
+                         parent = input$parent_population,
+                         name = input$population_name)
+              message("  - Gate added to GatingSet successfully")
+            }, error = function(e) {
+              stop(paste("Failed to add gate to GatingSet:", e$message))
+            })
             
-            # Recompute to apply the gate
-            recompute(values$current_gs)
-            message("  - GatingSet recomputed")
+            # Recompute to apply the gate with error handling
+            tryCatch({
+              recompute(values$current_gs)
+              message("  - GatingSet recomputed successfully")
+            }, error = function(e) {
+              stop(paste("Failed to recompute GatingSet:", e$message))
+            })
             
-            # Get post-gate population counts for comparison
-            post_pop_counts <- gs_pop_get_count_fast(values$current_gs)
+            # Pause briefly to allow recomputation to complete
+            Sys.sleep(0.1)
+            
+            # Get post-gate population counts for comparison with better error handling
+            post_pop_counts <- tryCatch({
+              gs_pop_get_count_fast(values$current_gs)
+            }, error = function(e) {
+              message("ERROR getting population counts: ", e$message)
+              # Try alternative method
+              tryCatch({
+                gs_pop_get_stats(values$current_gs)
+              }, error = function(e2) {
+                message("ERROR with alternative method: ", e2$message)
+                return(NULL)
+              })
+            })
+            
+            if (is.null(post_pop_counts)) {
+              showNotification("Warning: Could not retrieve population counts after gating", type = "warning")
+              return()
+            }
+            
             message("- Population counts AFTER adding and recomputing gate:")
             for (i in seq_len(nrow(post_pop_counts))) {
               message("  - ", post_pop_counts$Population[i], ": ", post_pop_counts$Count[i], " events")
             }
             
-                         # Check if the new gate captured any events
-             # Fix: Handle population paths that include "/" separators
-             new_gate_row <- which(grepl(paste0(input$population_name, "$"), post_pop_counts$Population))
-             if (length(new_gate_row) > 0) {
-               new_gate_count <- post_pop_counts$Count[new_gate_row]
-               actual_pop_name <- post_pop_counts$Population[new_gate_row]
-               message("- NEW GATE RESULT: ", actual_pop_name, " captured ", new_gate_count, " events")
-               
-               if (new_gate_count == 0) {
-                 warning_msg <- paste("Gate", input$population_name, "captured 0 events!",
-                                      "Check if gate coordinates are within the parent population range.")
-                 message("- WARNING: ", warning_msg)
-                 showNotification(warning_msg, type = "warning")
-               } else {
-                 success_msg <- paste("Gate", input$population_name, "captured", format(new_gate_count, big.mark = ","), "events")
-                 message("- SUCCESS: ", success_msg)
-                 showNotification(success_msg, type = "message")
-               }
-             } else {
-               # Also try exact match as fallback
-               exact_match_row <- which(post_pop_counts$Population == input$population_name)
-               if (length(exact_match_row) > 0) {
-                 new_gate_count <- post_pop_counts$Count[exact_match_row]
-                 message("- NEW GATE RESULT (exact match): ", input$population_name, " captured ", new_gate_count, " events")
-                 success_msg <- paste("Gate", input$population_name, "captured", format(new_gate_count, big.mark = ","), "events")
-                 showNotification(success_msg, type = "message")
-               } else {
-                 error_msg <- paste("ERROR: Gate", input$population_name, "was not found in population counts after creation!")
-                 message("- ", error_msg)
-                 message("- Available populations:", paste(post_pop_counts$Population, collapse = ", "))
-                 showNotification(error_msg, type = "error")
-               }
-             }
+            # Find the new gate with improved logic
+            # Create expected population path
+            expected_pop_path <- if (input$parent_population == "root") {
+              input$population_name
+            } else {
+              paste(input$parent_population, input$population_name, sep = "/")
+            }
             
-            # Trigger hierarchy update
-            values$hierarchy_trigger <- values$hierarchy_trigger + 1
-            showNotification(paste("Gate", input$population_name, "saved successfully!"), 
-                             type = "message")
+            message("- Looking for new population with path: ", expected_pop_path)
+            
+            # Try multiple search strategies
+            new_gate_row <- NULL
+            
+            # Strategy 1: Exact match
+            new_gate_row <- which(post_pop_counts$Population == expected_pop_path)
+            if (length(new_gate_row) == 0) {
+              # Strategy 2: Direct name match
+              new_gate_row <- which(post_pop_counts$Population == input$population_name)
+            }
+            if (length(new_gate_row) == 0) {
+              # Strategy 3: Ends with population name
+              new_gate_row <- which(grepl(paste0(input$population_name, "$"), post_pop_counts$Population))
+            }
+            
+            if (length(new_gate_row) > 0) {
+              new_gate_count <- post_pop_counts$Count[new_gate_row[1]]  # Take first match
+              actual_pop_name <- post_pop_counts$Population[new_gate_row[1]]
+              message("- NEW GATE FOUND: ", actual_pop_name, " captured ", new_gate_count, " events")
+              
+              if (is.na(new_gate_count) || new_gate_count == 0) {
+                warning_msg <- paste("Gate", input$population_name, "captured 0 events!",
+                                     "Check if gate coordinates are within the parent population range.")
+                message("- WARNING: ", warning_msg)
+                showNotification(warning_msg, type = "warning")
+              } else {
+                success_msg <- paste("Gate", input$population_name, "captured", format(new_gate_count, big.mark = ","), "events")
+                message("- SUCCESS: ", success_msg)
+                showNotification(success_msg, type = "message")
+              }
+            } else {
+              error_msg <- paste("ERROR: Could not find gate", input$population_name, "in population counts!")
+              message("- ", error_msg)
+              message("- Expected path: ", expected_pop_path)
+              message("- Available populations:", paste(post_pop_counts$Population, collapse = ", "))
+              showNotification(error_msg, type = "error")
+            }
+            
+            # Force complete refresh of the gating set
+            tryCatch({
+              # Force a complete recomputation
+              recompute(values$current_gs)
+              message("- Forced complete recomputation after gate creation")
+              
+              # Trigger multiple hierarchy updates with delay
+              values$hierarchy_trigger <- values$hierarchy_trigger + 1
+              
+              # Update hierarchy display immediately
+              updateHierarchyDisplay()
+              
+              # Schedule another update after a short delay
+              shiny::invalidateLater(100, session)
+              
+              showNotification(paste("Gate", input$population_name, "saved successfully!"), 
+                               type = "message")
+              
+            }, error = function(e) {
+              message("Error in post-gate refresh: ", e$message)
+              showNotification(paste("Gate saved but may have display issues:", e$message), 
+                               type = "warning")
+            })
           }
-          
-          # Update hierarchy display
-          updateHierarchyDisplay()
           
           # Reset gating mode
           values$drawing_mode <- FALSE
@@ -1104,6 +1451,9 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
           
           # Clear population name for next gate
           updateTextInput(session, "population_name", value = "")
+          
+          # Force update of all reactive elements
+          values$hierarchy_trigger <- values$hierarchy_trigger + 1
           
         } else {
           message("- ERROR: Gate creation returned NULL")
@@ -1127,6 +1477,37 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
       values$selection_type <- NULL
       values$instruction_message <- "Select gate type and click 'Start Gating' to begin"
       showNotification("Gating cancelled", type = "message")
+    })
+    
+    # Manual refresh hierarchy
+    observeEvent(input$refresh_hierarchy, {
+      req(values$current_gs)
+      
+      tryCatch({
+        message("=== MANUAL HIERARCHY REFRESH START ===")
+        
+        # Force complete recomputation
+        recompute(values$current_gs)
+        message("- Forced recomputation completed")
+        
+        # Trigger all reactive updates
+        values$hierarchy_trigger <- values$hierarchy_trigger + 1
+        
+        # Update hierarchy display
+        updateHierarchyDisplay()
+        
+        # Force update of all UI elements
+        shiny::invalidateLater(50, session)
+        
+        showNotification("Hierarchy display refreshed successfully!", type = "message")
+        
+        message("=== MANUAL HIERARCHY REFRESH END ===")
+        
+      }, error = function(e) {
+        error_msg <- paste("Error refreshing hierarchy:", e$message)
+        message("- ERROR: ", error_msg)
+        showNotification(error_msg, type = "error")
+      })
     })
     
     # Enhanced helper function to create gates from coordinates using advanced helpers
@@ -1293,16 +1674,44 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
     updateHierarchyDisplay <- function() {
       if (!is.null(values$current_gs)) {
         tryCatch({
-          # Get population paths and counts with validation
-          pop_paths <- gs_get_pop_paths(values$current_gs, path = "auto")
-          pop_counts <- gs_pop_get_count_fast(values$current_gs)
+          # Get population paths with error handling
+          pop_paths <- tryCatch({
+            gs_get_pop_paths(values$current_gs, path = "auto")
+          }, error = function(e) {
+            message("Error getting population paths: ", e$message)
+            return(c("root"))
+          })
+          
+          # Get population counts with multiple fallback methods
+          pop_counts <- tryCatch({
+            gs_pop_get_count_fast(values$current_gs)
+          }, error = function(e) {
+            message("Error with gs_pop_get_count_fast: ", e$message)
+            # Try alternative method
+            tryCatch({
+              stats <- gs_pop_get_stats(values$current_gs)
+              # Convert to expected format
+              data.frame(
+                Population = stats$pop,
+                Count = stats$Count,
+                stringsAsFactors = FALSE
+              )
+            }, error = function(e2) {
+              message("Error with gs_pop_get_stats: ", e2$message)
+              # Create minimal data frame
+              data.frame(
+                Population = pop_paths,
+                Count = rep(0, length(pop_paths)),
+                stringsAsFactors = FALSE
+              )
+            })
+          })
           
           # Validate data before proceeding
           if (is.null(pop_paths) || length(pop_paths) == 0 || 
               is.null(pop_counts) || nrow(pop_counts) == 0) {
             # Set minimal options if no data
             updateSelectInput(session, "parent_population", choices = list("root" = "root"))
-            updateSelectInput(session, "bool_populations", choices = NULL)
             updateSelectInput(session, "extract_population", choices = NULL)
             return()
           }
@@ -1316,17 +1725,7 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
           updateSelectInput(session, "parent_population",
                             choices = setNames(pop_paths, parent_labels))
           
-          # Update boolean gate population choices (exclude root)
-          bool_choices <- pop_paths[pop_paths != "root" & !is.na(pop_paths)]
-          if (length(bool_choices) > 0) {
-            bool_indices <- match(bool_choices, pop_paths)
-            bool_counts <- safe_counts[bool_indices]
-            bool_labels <- paste0(bool_choices, " (", format(bool_counts, big.mark = ","), " events)")
-            updateSelectInput(session, "bool_populations", 
-                              choices = setNames(bool_choices, bool_labels))
-          } else {
-            updateSelectInput(session, "bool_populations", choices = NULL)
-          }
+
           
           # Update extract population choices (exclude root)
           extract_choices <- pop_paths[pop_paths != "root" & !is.na(pop_paths)]
@@ -1348,7 +1747,6 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
           showNotification(paste("Error updating hierarchy display:", e$message), type = "warning")
           # Set safe defaults on error
           updateSelectInput(session, "parent_population", choices = list("root" = "root"))
-          updateSelectInput(session, "bool_populations", choices = NULL)
           updateSelectInput(session, "extract_population", choices = NULL)
         })
       }
@@ -1361,8 +1759,36 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
       values$hierarchy_trigger
       
       tryCatch({
-        pop_paths <- gs_get_pop_paths(values$current_gs, path = "auto")
-        pop_counts <- gs_pop_get_count_fast(values$current_gs)
+        # Get population paths with error handling
+        pop_paths <- tryCatch({
+          gs_get_pop_paths(values$current_gs, path = "auto")
+        }, error = function(e) {
+          message("Error getting population paths in hierarchy tree: ", e$message)
+          return(c("root"))
+        })
+        
+        # Get population counts with error handling
+        pop_counts <- tryCatch({
+          gs_pop_get_count_fast(values$current_gs)
+        }, error = function(e) {
+          message("Error getting population counts in hierarchy tree: ", e$message)
+          # Try alternative method
+          tryCatch({
+            stats <- gs_pop_get_stats(values$current_gs)
+            data.frame(
+              Population = stats$pop,
+              Count = stats$Count,
+              stringsAsFactors = FALSE
+            )
+          }, error = function(e2) {
+            message("Error with alternative method in hierarchy tree: ", e2$message)
+            data.frame(
+              Population = pop_paths,
+              Count = rep(0, length(pop_paths)),
+              stringsAsFactors = FALSE
+            )
+          })
+        })
         
         # Validate data
         if (is.null(pop_paths) || length(pop_paths) == 0 || 
@@ -1410,8 +1836,24 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
       values$hierarchy_trigger
       
       tryCatch({
-        # Get comprehensive population statistics
-        pop_counts <- gs_pop_get_count_fast(values$current_gs)
+        # Get comprehensive population statistics with error handling
+        pop_counts <- tryCatch({
+          gs_pop_get_count_fast(values$current_gs)
+        }, error = function(e) {
+          message("Error getting population counts in statistics: ", e$message)
+          # Try alternative method
+          tryCatch({
+            stats <- gs_pop_get_stats(values$current_gs)
+            data.frame(
+              Population = stats$pop,
+              Count = stats$Count,
+              stringsAsFactors = FALSE
+            )
+          }, error = function(e2) {
+            message("Error with alternative method in statistics: ", e2$message)
+            return(NULL)
+          })
+        })
         
         # Validate population counts data
         if (is.null(pop_counts) || nrow(pop_counts) == 0) {
@@ -1467,7 +1909,24 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
       values$hierarchy_trigger
       
       tryCatch({
-        pop_counts <- gs_pop_get_count_fast(values$current_gs)
+        # Get population counts with error handling
+        pop_counts <- tryCatch({
+          gs_pop_get_count_fast(values$current_gs)
+        }, error = function(e) {
+          message("Error getting population counts in table: ", e$message)
+          # Try alternative method
+          tryCatch({
+            stats <- gs_pop_get_stats(values$current_gs)
+            data.frame(
+              Population = stats$pop,
+              Count = stats$Count,
+              stringsAsFactors = FALSE
+            )
+          }, error = function(e2) {
+            message("Error with alternative method in table: ", e2$message)
+            return(NULL)
+          })
+        })
         
         # Validate population counts data
         if (is.null(pop_counts) || nrow(pop_counts) == 0) {
@@ -1655,19 +2114,7 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
       }
     })
     
-    # Boolean gate creation
-    observeEvent(input$create_boolean, {
-      req(input$bool_expression, input$bool_name)
-      
-      tryCatch({
-        # Create boolean filter from expression
-        # This is a simplified implementation
-        showNotification("Boolean gate functionality coming soon!", type = "message")
-        
-      }, error = function(e) {
-        showNotification(paste("Error creating boolean gate:", e$message), type = "error")
-      })
-    })
+
     
     # Export gated FCS files
     output$export_gated_fcs <- downloadHandler(

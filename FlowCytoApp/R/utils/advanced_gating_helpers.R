@@ -351,24 +351,7 @@ createQuadrantGates <- function(coords, x_channel, y_channel, alias_prefix) {
   })
 }
 
-# Boolean gate helpers (simplified implementation)
 
-# Create boolean gate from expression
-createBooleanGate <- function(expression, population_names, alias) {
-  tryCatch({
-    # This is a simplified implementation
-    # In a full implementation, you would parse the expression
-    # and create proper boolean filters
-    
-    # For now, return a placeholder
-    showNotification("Boolean gate creation is not yet fully implemented", 
-                     type = "message")
-    return(NULL)
-    
-  }, error = function(e) {
-    stop(paste("Error creating boolean gate:", e$message))
-  })
-}
 
 # Population statistics helpers
 

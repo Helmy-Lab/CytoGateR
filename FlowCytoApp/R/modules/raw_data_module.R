@@ -340,8 +340,8 @@ rawDataModuleServer <- function(id, app_state) {
         # Look for potential live/dead markers in both parameter names and descriptions
         potential_ld_markers_names <- grep("live|dead|viability|FL3-A", 
                                           parameter_names, 
-                                          ignore.case = TRUE, 
-                                          value = TRUE)
+                                     ignore.case = TRUE, 
+                                     value = TRUE)
         
         potential_ld_markers_desc <- grep("live|dead|viability", 
                                          parameter_descriptions, 
@@ -604,9 +604,9 @@ rawDataModuleServer <- function(id, app_state) {
         # Create scatter plot data with error handling
         plot_data <- tryCatch({
           data.frame(
-            FSC = exprs(rawFCS())[, fsc_col],
-            LiveDead = exprs(rawFCS())[, ld_marker]
-          )
+          FSC = exprs(rawFCS())[, fsc_col],
+          LiveDead = exprs(rawFCS())[, ld_marker]
+        )
         }, error = function(e) {
           return(NULL)
         })

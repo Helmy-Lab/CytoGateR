@@ -1,56 +1,7 @@
 # Advanced Gating Helper Functions
 # All libraries loaded in global.R
 
-# Boolean Gate Helper Functions -----------------------------------------------
 
-#' Create Boolean Gate
-#' @param gs GatingSet object
-#' @param parent Parent population name
-#' @param alias New population name
-#' @param logic Boolean logic string (e.g., "CD4+&CD8-", "CD3+|CD19+")
-#' @return Updated GatingSet with boolean gate
-createBooleanGate <- function(gs, parent = "root", alias, logic) {
-  tryCatch({
-    # Parse logic string to identify referenced populations
-    populations <- extractPopulationsFromLogic(logic)
-    
-    # Validate that all referenced populations exist
-    available_pops <- gs_get_pop_paths(gs, path = "auto")
-    missing_pops <- populations[!populations %in% available_pops]
-    
-    if (length(missing_pops) > 0) {
-      stop(paste("Population(s) not found:", paste(missing_pops, collapse = ", ")))
-    }
-    
-    # Create boolean filter
-    bool_filter <- booleanFilter(logic, filterId = alias)
-    
-    # Add boolean gate to GatingSet
-    gs_pop_add(gs, bool_filter, parent = parent, name = alias)
-    
-    # Recompute statistics
-    recompute(gs)
-    
-    return(gs)
-    
-  }, error = function(e) {
-    stop(paste("Error creating boolean gate:", e$message))
-  })
-}
-
-#' Extract population names from boolean logic string
-#' @param logic Boolean logic string
-#' @return Vector of population names referenced in the logic
-extractPopulationsFromLogic <- function(logic) {
-  # Remove boolean operators and parentheses
-  clean_logic <- gsub("[\\&\\|\\!\\(\\)]", " ", logic)
-  
-  # Split by whitespace and remove empty strings
-  populations <- trimws(strsplit(clean_logic, "\\s+")[[1]])
-  populations <- populations[populations != ""]
-  
-  return(unique(populations))
-}
 
 # Clustering-based Gate Helper Functions -------------------------------------- 
 
@@ -317,8 +268,6 @@ determineGatingMethod <- function(gate_obj) {
     return("ellipsoidGate")
   } else if (is(gate_obj, "quadGate")) {
     return("quadGate")
-  } else if (is(gate_obj, "booleanFilter")) {
-    return("boolGate")
   } else {
     return("cyto_gate_draw")
   }
@@ -330,11 +279,7 @@ determineGatingMethod <- function(gate_obj) {
 serializeGateArgs <- function(gate_obj) {
   # This is a simplified serialization
   # In practice, you might want more sophisticated serialization
-  if (is(gate_obj, "booleanFilter")) {
-    return(gate_obj@deparse)
-  } else {
-    return("gate=gate_obj")
-  }
+  return("gate=gate_obj")
 }
 
 # Gate Validation and Quality Control Functions -------------------------------
