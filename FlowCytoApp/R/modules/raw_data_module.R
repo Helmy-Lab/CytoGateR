@@ -1145,6 +1145,16 @@ rawDataModuleServer <- function(id, app_state) {
         
         results$plot_data <- plot_data
         results$markers <- input$selectedMarkers
+        
+        # CRITICAL: Preserve original flowSet for gating module compatibility
+        if (inherits(raw_data, "flowFrame")) {
+          # Convert single flowFrame to flowSet
+          results$raw_data <- flowSet(raw_data)
+        } else if (inherits(raw_data, "flowSet")) {
+          # Store original flowSet
+          results$raw_data <- raw_data  
+        }
+        
         processedData(results)
         
         # Display notification about preprocessing results

@@ -35,17 +35,22 @@ ui <- navbarPage(
   tabPanel("Settings", 
            settingsModuleUI("settings")
   ),
-  
-  # Tab for the Raw Data Module
-  tabPanel("Raw Data", 
-           rawDataModuleUI("raw_data")
+
+  # Tab for the Compensation Module
+  tabPanel("Spillover Compensation", 
+           compensationModuleUI("compensation")
   ),
   
   # Tab for the Gating Module
   tabPanel("Interactive Gating", 
            gatingModuleUI("gating")
   ),
-  
+    
+  # Tab for the Raw Data Module
+  tabPanel("Raw Data", 
+           rawDataModuleUI("raw_data")
+  ),
+
   # Tab for the Processed Data Module
   tabPanel("Processed Data", 
            processedDataModuleUI("processed_data")
@@ -72,6 +77,7 @@ server <- function(input, output, session) {
   
   # Call module servers
   raw_data_results <- rawDataModuleServer("raw_data", app_state)
+  compensation_results <- compensationModuleServer("compensation", app_state)
   gating_results <- gatingModuleServer("gating", app_state, raw_data_results)
   batch_results <- batchAnalysisModuleServer("batch_analysis", app_state)
   settings_results <- settingsModuleServer("settings", app_state)
