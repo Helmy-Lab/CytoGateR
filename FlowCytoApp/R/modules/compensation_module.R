@@ -59,18 +59,6 @@ compensationModuleUI <- function(id) {
       # Workflow Progress Indicator
       div(class = "compensation-workflow",
           h3(icon("flask"), "Spillover Compensation Workflow"),
-          div(class = "step-indicator",
-              div(class = "step", id = ns("step_upload"), 
-                  icon("upload"), br(), "Upload Files"),
-              div(class = "step", id = ns("step_assign"), 
-                  icon("tags"), br(), "Assign Controls"),
-              div(class = "step", id = ns("step_compute"), 
-                  icon("calculator"), br(), "Generate Matrix"),
-              div(class = "step", id = ns("step_qc"), 
-                  icon("chart-line"), br(), "Quality Control"),
-              div(class = "step", id = ns("step_export"), 
-                  icon("download"), br(), "Export Results")
-          )
       ),
       
       # Main Tabset Panel
@@ -86,7 +74,7 @@ compensationModuleUI <- function(id) {
                    # File Upload Section
                    column(6,
                           shinydashboard::box(
-                            title = "FCS File Upload", 
+                            title = "FCS File Upload",
                             status = "primary", 
                             solidHeader = TRUE,
                             width = 12,
