@@ -6,215 +6,422 @@
 rawDataModuleUI <- function(id) {
   ns <- NS(id)
   
-  sidebarLayout(
-    sidebarPanel(
-      fileInput(ns("fcsFile"), "Upload FCS/CSV/TSV File", accept = c(".fcs", ".csv", ".tsv")),
-      uiOutput(ns("markerSelectUI")),
-      
-      # Spillover compensation options
-      hr(),
-      h4("Spillover Compensation"),
-      checkboxInput(ns("enableCompensation"), "Enable Spillover Compensation", value = FALSE),
-      conditionalPanel(
-        condition = paste0("input['", ns("enableCompensation"), "'] === true"),
-        
-        # Upload multiple control files
-        fileInput(ns("controlFiles"), "Upload Control Files (FCS only)", 
-                  accept = c(".fcs"), multiple = TRUE),
-        
-        # Upload unstained control file
-        fileInput(ns("unstainedControlFile"), "Upload Unstained Control File (FCS only)", 
-                  accept = c(".fcs"), multiple = FALSE),
-        
-        # UI for assigning markers to control files
-        uiOutput(ns("markerAssignmentUI")),
-        
-        # Button to compute spillover matrix
-        actionButton(ns("computeSpillover"), "Compute Spillover Matrix", 
-                     class = "btn-info", style = "margin-bottom: 10px;"),
-        
-        # Display spillover computation status
-        verbatimTextOutput(ns("spilloverStatus")),
-        
-        # Option to upload pre-computed spillover matrix
-        hr(),
-        fileInput(ns("spilloverMatrixFile"), "Or Upload Pre-computed Spillover Matrix (CSV)", 
-                  accept = c(".csv")),
-        
-        # Display current spillover matrix
-        conditionalPanel(
-          condition = paste0("output['", ns("spilloverStatus"), "'] !== null"),
-          h5("Current Spillover Matrix:"),
-          DT::dataTableOutput(ns("spilloverMatrixDisplay"))
-        )
-      ),
-      
-      # Transform options
-      hr(),
-      h4("Data Transformation"),
-      checkboxInput(ns("transform"), "Apply arcsinh transformation", value = TRUE),
-      numericInput(ns("cofactor"), "Transformation cofactor", value = 5, min = 1, max = 10),
-      numericInput(ns("nEvents"), "Number of events to analyze", value = 5000, min = 100, step = 100),
-      
-      # Dimensionality reduction method selection
-      checkboxGroupInput(ns("methods"), "Select Dimensionality Reduction Methods",
-                         choices = c("t-SNE", "UMAP", "PCA", "MDS"),
-                         selected = c("t-SNE", "UMAP")),
-      
-      # t-SNE parameters
-      conditionalPanel(
-        condition = paste0("input['", ns("methods"), "'].includes('t-SNE')"),
-        numericInput(ns("perplexity"), "t-SNE Perplexity", value = 30, min = 5, max = 50),
-        checkboxInput(ns("use_barnes_hut"), "Use Barnes-Hut Approximation (faster)", value = TRUE),
-        conditionalPanel(
-          condition = paste0("input['", ns("use_barnes_hut"), "']"),
-          sliderInput(ns("tsne_theta"), "Barnes-Hut theta (higher theta = speed, lower theta = accuracy)", 
-                      min = 0.0, max = 1.0, value = 0.5, step = 0.1)
-        ),
-        conditionalPanel(
-          condition = paste0("!input['", ns("use_barnes_hut"), "']"),
-          tags$div(class = "alert alert-warning",
-                   "Warning: Exact t-SNE is very slow for datasets > 1000 cells.")
-        ),
-        numericInput(ns("tsne_max_iter"), "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
-      ),
-      
-      # UMAP parameters
-      conditionalPanel(
-        condition = paste0("input['", ns("methods"), "'].includes('UMAP')"),
-        numericInput(ns("n_neighbors"), "UMAP n_neighbors", value = 15, min = 2, max = 100)
-      ),
-      
-      # PCA parameters
-      conditionalPanel(
-        condition = paste0("input['", ns("methods"), "'].includes('PCA')"),
-        numericInput(ns("pca_components"), "PCA: Number of Components", value = 2, min = 2, max = 10)
-      ),
-      
-      # MDS parameters
-      conditionalPanel(
-        condition = paste0("input['", ns("methods"), "'].includes('MDS')"),
-        tags$p("MDS does not require additional parameters. It uses Euclidean distances by default."),
-        tags$small("Note: MDS can be slow for large datasets.")
-      ),
-      
-      # QC and gating options
-      checkboxInput(ns("performQC"), "Perform Quality Control", value = TRUE),
-      numericInput(ns("maxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50),
-      
-      checkboxInput(ns("performGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
-      conditionalPanel(
-        condition = paste0("input['", ns("performGating"), "'] === true"),
-        textInput(ns("debrisGate"), "FSC/SSC Parameters (comma-separated)", 
-                  value = "FSC-A,SSC-A"),
-        selectInput(ns("liveDeadGate"), "Live/Dead Parameter", 
-                    choices = c("None", "Live Dead BV570 Violet-610-A"),
-                    selected = "None"),
-        # Add live/dead threshold parameter
-        conditionalPanel(
-          condition = paste0("input['", ns("liveDeadGate"), "'] !== 'None'"),
-          numericInput(ns("liveDeadThreshold"), "Live/Dead Threshold", 
-                       value = 1000, min = 0, max = 10000, step = 100),
-          helpText("Cells with values below this threshold will be considered live")
-        )
-      ),
-      
-      # Add clustering module UI
-      clusteringModuleUI(ns("clustering")),
-      
-      # Run button
-      hr(),
-      actionButton(ns("run"), "Run Analysis", class = "btn-primary"),
-      
-      # Download options
-      hr(),
-      h4("Download Results"),
-      downloadButton(ns("downloadClusterTable"), "Download Cluster Data"),
-      br(), br(),
-      downloadButton(ns("downloadProcessedData"), "Download Processed Data")
+    fluidPage(
+    shinyjs::useShinyjs(),
+    
+    # Enhanced CSS for better styling - matching compensation and gating modules
+    tags$head(
+      tags$style(HTML("
+        .analysis-workflow {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          margin-bottom: 20px;
+        }
+        .parameter-group {
+          background-color: #e3f2fd;
+          padding: 10px;
+          border-radius: 5px;
+          margin-bottom: 10px;
+        }
+        .compensation-panel {
+          background-color: #f8f9fa;
+          padding: 15px;
+          border-radius: 8px;
+          margin-bottom: 10px;
+          border: 1px solid #dee2e6;
+        }
+        .method-controls {
+          background-color: #f1f8e9;
+          padding: 8px;
+          border-radius: 5px;
+          margin: 5px 0;
+        }
+      "))
+    ),
+    # Workflow Progress Header
+    div(class = "analysis-workflow",
+        h3(icon("chart-line"), "Raw Data Analysis Workflow"),
+        p("Upload flow cytometry data, configure analysis parameters, and explore dimensional reductions")
     ),
     
-    mainPanel(
-      tabsetPanel(
-        tabPanel("t-SNE", shinycssloaders::withSpinner(plotlyOutput(ns("tsnePlot"), height = "600px"))),
-        tabPanel("UMAP", shinycssloaders::withSpinner(plotlyOutput(ns("umapPlot"), height = "600px"))),
-        tabPanel("PCA", shinycssloaders::withSpinner(plotlyOutput(ns("pcaPlot"), height = "600px"))),
-        tabPanel("MDS", shinycssloaders::withSpinner(plotlyOutput(ns("mdsPlot"), height = "600px"))),
-        tabPanel("Data Info", verbatimTextOutput(ns("fcsInfo")), uiOutput(ns("optimizationMetricsUI"))),
-        tabPanel("Spillover Compensation", 
-                 conditionalPanel(
-                   condition = paste0("input['", ns("enableCompensation"), "'] === true"),
-                   fluidRow(
-                     column(6,
-                            h4("Spillover Matrix"),
-                            DT::dataTableOutput(ns("spilloverMatrixTable"))
-                     ),
-                     column(6,
-                            h4("Compensation Effects"),
-                            plotOutput(ns("compensationEffectsPlot"), height = "400px")
-                     )
-                   ),
-                   hr(),
-                   fluidRow(
-                     column(12,
-                            h4("Before vs After Compensation"),
-                            plotOutput(ns("beforeAfterCompensationPlot"), height = "500px")
-                     )
-                   )
-                 ),
-                 conditionalPanel(
-                   condition = paste0("input['", ns("enableCompensation"), "'] === false"),
-                   div(class = "alert alert-info",
-                       h4("Spillover Compensation Disabled"),
-                       p("Enable spillover compensation in the sidebar to view compensation analysis.")
-                   )
-                 )
+    fluidRow(
+      # Left Panel - Enhanced Controls with shinydashboard boxes
+      column(3,
+        # Data Upload Section
+        shinydashboard::box(
+          title = "Data Upload", status = "primary", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          fileInput(ns("fcsFile"), "Upload FCS/CSV/TSV File", 
+                    accept = c(".fcs", ".csv", ".tsv"),
+                    buttonLabel = "Browse Files...",
+                    placeholder = "No file selected"),
+          
+          helpText(icon("info-circle"), 
+                   "Supported formats: FCS files, CSV, and TSV data files."),
+          
+          # Marker Selection UI
+          uiOutput(ns("markerSelectUI"))
         ),
-        # Add new tab for Live/Dead Analysis
-        tabPanel("Live/Dead Analysis", 
-                 fluidRow(
-                   column(12, h4("Live/Dead Marker Distribution", align = "center")),
-                   column(8, shinycssloaders::withSpinner(plotOutput(ns("liveDeadHistogram"), height = "400px"))),
-                   column(4, 
-                          wellPanel(
-                            h4("Live/Dead Gating Settings"),
-                            uiOutput(ns("liveDeadMarkerUI")),
-                            conditionalPanel(
-                              condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
-                              sliderInput(ns("liveDeadThresholdSlider"), "Threshold", 
-                                          min = 0, max = 5000, value = 1000, step = 100),
-                              checkboxInput(ns("useLogScale"), "Use Log Scale for Visualization", value = TRUE),
-                              hr(),
-                              h4("Gating Results"),
-                              verbatimTextOutput(ns("liveDeadStats")),
-                              actionButton(ns("applyLiveDeadGating"), "Apply to Preprocessing", 
-                                           class = "btn-primary", width = "100%")
-                            )
-                          ))
-                 ),
-                 fluidRow(
-                   column(12, 
-                          conditionalPanel(
-                            condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
-                            h4("2D Visualization", align = "center"),
-                            plotOutput(ns("liveDeadScatter"), height = "400px")
-                          ))
-                 )),
-        tabPanel("Cluster Analysis", 
-                 conditionalPanel(
-                   condition = paste0("input['", ns("clustering-showClusteringOptions"), "'] == true"),
-                   tabsetPanel(
-                     tabPanel("Cluster Visualization", 
-                              div(
-                                style = "position: relative;",
-                                plotlyOutput(ns("clusterPlot"), height = "600px")
-                              )
-                     ),
-                     tabPanel("Cluster Profiles", shinycssloaders::withSpinner(plotOutput(ns("clusterHeatmap")))),
-                     tabPanel("Cluster Statistics", DT::dataTableOutput(ns("clusterStats"))),
-                     tabPanel("Identified Populations", DT::dataTableOutput(ns("populationTable")))
-                   )
-                 )
+        
+        # Spillover Compensation Section
+        shinydashboard::box(
+          title = "Spillover Compensation", status = "warning", solidHeader = TRUE,
+          width = 12, collapsible = TRUE, collapsed = TRUE,
+          
+          checkboxInput(ns("enableCompensation"), "Enable Spillover Compensation", value = FALSE),
+          
+          conditionalPanel(
+            condition = paste0("input['", ns("enableCompensation"), "'] === true"),
+            
+            div(class = "compensation-panel",
+              h5(icon("upload"), "Control Files"),
+              
+              # Upload multiple control files
+              fileInput(ns("controlFiles"), "Upload Control Files (FCS only)", 
+                        accept = c(".fcs"), multiple = TRUE),
+              
+              # Upload unstained control file
+              fileInput(ns("unstainedControlFile"), "Upload Unstained Control File (FCS only)", 
+                        accept = c(".fcs"), multiple = FALSE),
+              
+              # UI for assigning markers to control files
+              uiOutput(ns("markerAssignmentUI")),
+              
+              # Button to compute spillover matrix
+              actionButton(ns("computeSpillover"), "Compute Spillover Matrix", 
+                           class = "btn-info btn-block", 
+                           icon = icon("calculator"),
+                           style = "margin-bottom: 10px;"),
+              
+              # Display spillover computation status
+              verbatimTextOutput(ns("spilloverStatus"))
+            ),
+            
+            hr(),
+            
+            # Option to upload pre-computed spillover matrix
+            h5(icon("file-import"), "Import Existing Matrix"),
+            fileInput(ns("spilloverMatrixFile"), "Upload Pre-computed Spillover Matrix (CSV)", 
+                      accept = c(".csv")),
+            
+            # Display current spillover matrix
+            conditionalPanel(
+              condition = paste0("output['", ns("spilloverStatus"), "'] !== null"),
+              h5("Current Spillover Matrix:"),
+              DT::dataTableOutput(ns("spilloverMatrixDisplay"))
+            )
+          )
+        ),
+        
+        # Data Transformation Section
+        shinydashboard::box(
+          title = "Data Transformation", status = "success", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          div(class = "parameter-group",
+            h5(icon("magic"), "Transformation Parameters"),
+            checkboxInput(ns("transform"), "Apply arcsinh transformation", value = TRUE),
+            numericInput(ns("cofactor"), "Transformation cofactor", value = 5, min = 1, max = 10),
+            numericInput(ns("nEvents"), "Number of events to analyze", value = 5000, min = 100, step = 100)
+          )
+        ),
+        
+        # Dimensionality Reduction Section
+        shinydashboard::box(
+          title = "Dimensionality Reduction", status = "info", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          # Method selection
+          div(class = "parameter-group",
+            h5(icon("project-diagram"), "Methods"),
+            checkboxGroupInput(ns("methods"), "Select Methods:",
+                               choices = c("t-SNE", "UMAP", "PCA", "MDS"),
+                               selected = c("t-SNE", "UMAP"))
+          ),
+          
+          # t-SNE parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("methods"), "'].includes('t-SNE')"),
+            div(class = "method-controls",
+              h6(icon("cog"), "t-SNE Parameters"),
+              numericInput(ns("perplexity"), "Perplexity", value = 30, min = 5, max = 50),
+              checkboxInput(ns("use_barnes_hut"), "Use Barnes-Hut Approximation (faster)", value = TRUE),
+              conditionalPanel(
+                condition = paste0("input['", ns("use_barnes_hut"), "']"),
+                sliderInput(ns("tsne_theta"), "Barnes-Hut theta", 
+                            min = 0.0, max = 1.0, value = 0.5, step = 0.1)
+              ),
+              conditionalPanel(
+                condition = paste0("!input['", ns("use_barnes_hut"), "']"),
+                div(class = "alert alert-warning", style = "padding: 8px; margin: 5px 0;",
+                    icon("exclamation-triangle"), " Exact t-SNE is very slow for datasets > 1000 cells.")
+              ),
+              numericInput(ns("tsne_max_iter"), "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
+            )
+          ),
+          
+          # UMAP parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("methods"), "'].includes('UMAP')"),
+            div(class = "method-controls",
+              h6(icon("cog"), "UMAP Parameters"),
+              numericInput(ns("n_neighbors"), "n_neighbors", value = 15, min = 2, max = 100)
+            )
+          ),
+          
+          # PCA parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("methods"), "'].includes('PCA')"),
+            div(class = "method-controls",
+              h6(icon("cog"), "PCA Parameters"),
+              numericInput(ns("pca_components"), "Number of Components", value = 2, min = 2, max = 10)
+            )
+          ),
+          
+          # MDS parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("methods"), "'].includes('MDS')"),
+            div(class = "method-controls",
+              h6(icon("cog"), "MDS Parameters"),
+              p("MDS uses Euclidean distances by default."),
+              tags$small("Note: MDS can be slow for large datasets.")
+            )
+          )
+        ),
+        
+        # Quality Control & Gating Section
+        shinydashboard::box(
+          title = "Quality Control & Gating", status = "warning", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          # QC options
+          div(class = "parameter-group",
+            h5(icon("shield-alt"), "Quality Control"),
+            checkboxInput(ns("performQC"), "Perform Quality Control", value = TRUE),
+            conditionalPanel(
+              condition = paste0("input['", ns("performQC"), "'] === true"),
+              numericInput(ns("maxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
+            )
+          ),
+          
+          # Gating options
+          div(class = "parameter-group",
+            h5(icon("filter"), "Cell Gating"),
+            checkboxInput(ns("performGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
+            conditionalPanel(
+              condition = paste0("input['", ns("performGating"), "'] === true"),
+              textInput(ns("debrisGate"), "FSC/SSC Parameters (comma-separated)", 
+                        value = "FSC-A,SSC-A"),
+              selectInput(ns("liveDeadGate"), "Live/Dead Parameter", 
+                          choices = c("None", "Live Dead BV570 Violet-610-A"),
+                          selected = "None"),
+              # Add live/dead threshold parameter
+              conditionalPanel(
+                condition = paste0("input['", ns("liveDeadGate"), "'] !== 'None'"),
+                numericInput(ns("liveDeadThreshold"), "Live/Dead Threshold", 
+                             value = 1000, min = 0, max = 10000, step = 100),
+                helpText("Cells with values below this threshold will be considered live")
+              )
+            )
+          )
+        ),
+        
+        # Clustering Section
+        shinydashboard::box(
+          title = "Clustering Analysis", status = "success", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          # Add clustering module UI
+          clusteringModuleUI(ns("clustering"))
+        ),
+        
+        # Run Analysis Section
+        shinydashboard::box(
+          title = "Execute Analysis", status = "primary", solidHeader = TRUE,
+          width = 12,
+          
+          actionButton(ns("run"), "Run Analysis", 
+                       class = "btn-primary btn-lg",
+                       icon = icon("play"),
+                       style = "width: 100%; font-weight: bold;"),
+          
+          hr(),
+          
+          # Download options
+          h5(icon("download"), "Download Results"),
+          fluidRow(
+            column(12,
+              downloadButton(ns("downloadClusterTable"), "Download Cluster Data",
+                            class = "btn-success btn-sm",
+                            icon = icon("table"),
+                            style = "width: 100%; margin-bottom: 5px;")
+            ),
+            column(12,
+              downloadButton(ns("downloadProcessedData"), "Download Processed Data",
+                            class = "btn-info btn-sm", 
+                            icon = icon("database"),
+                            style = "width: 100%;")
+            )
+          )
+        )
+      ),
+      
+      # Main Analysis Panel - Enhanced with shinydashboard boxes
+      column(9,
+        # Dimensionality Reduction Visualizations
+        shinydashboard::box(
+          title = "Dimensionality Reduction Visualizations", status = "primary", solidHeader = TRUE,
+          width = 12,
+          
+          tabsetPanel(
+            tabPanel("t-SNE", 
+                     br(),
+                     shinycssloaders::withSpinner(plotlyOutput(ns("tsnePlot"), height = "600px"))),
+            tabPanel("UMAP", 
+                     br(),
+                     shinycssloaders::withSpinner(plotlyOutput(ns("umapPlot"), height = "600px"))),
+            tabPanel("PCA", 
+                     br(),
+                     shinycssloaders::withSpinner(plotlyOutput(ns("pcaPlot"), height = "600px"))),
+            tabPanel("MDS", 
+                     br(),
+                     shinycssloaders::withSpinner(plotlyOutput(ns("mdsPlot"), height = "600px")))
+          )
+        ),
+        
+        # Data Information and Metrics
+        shinydashboard::box(
+          title = "Data Information & Optimization Metrics", status = "info", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          fluidRow(
+            column(6,
+              h5(icon("info-circle"), "Dataset Information"),
+              verbatimTextOutput(ns("fcsInfo"))
+            ),
+            column(6,
+              h5(icon("chart-bar"), "Analysis Metrics"),
+              uiOutput(ns("optimizationMetricsUI"))
+            )
+          )
+        ),
+        
+        # Spillover Compensation Analysis
+        shinydashboard::box(
+          title = "Spillover Compensation Analysis", status = "warning", solidHeader = TRUE,
+          width = 12, collapsible = TRUE, collapsed = TRUE,
+          
+          conditionalPanel(
+            condition = paste0("input['", ns("enableCompensation"), "'] === true"),
+            fluidRow(
+              column(6,
+                     shinydashboard::box(
+                       title = "Spillover Matrix", status = "info", solidHeader = TRUE,
+                       width = 12,
+                       DT::dataTableOutput(ns("spilloverMatrixTable"))
+                     )
+              ),
+              column(6,
+                     shinydashboard::box(
+                       title = "Compensation Effects", status = "success", solidHeader = TRUE,
+                       width = 12,
+                       plotOutput(ns("compensationEffectsPlot"), height = "400px")
+                     )
+              )
+            ),
+            shinydashboard::box(
+              title = "Before vs After Compensation", status = "primary", solidHeader = TRUE,
+              width = 12,
+              plotOutput(ns("beforeAfterCompensationPlot"), height = "500px")
+            )
+          ),
+          conditionalPanel(
+            condition = paste0("input['", ns("enableCompensation"), "'] === false"),
+            div(class = "alert alert-info", style = "margin: 15px;",
+                icon("info-circle"), 
+                h5("Spillover Compensation Disabled"),
+                p("Enable spillover compensation in the sidebar to view compensation analysis.")
+            )
+          )
+        ),
+        
+        # Live/Dead Analysis
+        shinydashboard::box(
+          title = "Live/Dead Cell Analysis", status = "success", solidHeader = TRUE,
+          width = 12, collapsible = TRUE, collapsed = TRUE,
+          
+          fluidRow(
+            column(8, 
+              shinydashboard::box(
+                title = "Live/Dead Marker Distribution", status = "info", solidHeader = TRUE,
+                width = 12,
+                shinycssloaders::withSpinner(plotOutput(ns("liveDeadHistogram"), height = "400px"))
+              )
+            ),
+            column(4, 
+              shinydashboard::box(
+                title = "Gating Controls", status = "warning", solidHeader = TRUE,
+                width = 12,
+                uiOutput(ns("liveDeadMarkerUI")),
+                conditionalPanel(
+                  condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
+                  sliderInput(ns("liveDeadThresholdSlider"), "Threshold", 
+                              min = 0, max = 5000, value = 1000, step = 100),
+                  checkboxInput(ns("useLogScale"), "Use Log Scale for Visualization", value = TRUE),
+                  hr(),
+                  h5("Gating Results"),
+                  verbatimTextOutput(ns("liveDeadStats")),
+                  actionButton(ns("applyLiveDeadGating"), "Apply to Preprocessing", 
+                               class = "btn-primary", style = "width: 100%;")
+                )
+              )
+            )
+          ),
+          conditionalPanel(
+            condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
+            shinydashboard::box(
+              title = "2D Live/Dead Visualization", status = "success", solidHeader = TRUE,
+              width = 12,
+              plotOutput(ns("liveDeadScatter"), height = "400px")
+            )
+          )
+        ),
+        
+        # Cluster Analysis
+        shinydashboard::box(
+          title = "Cluster Analysis Results", status = "success", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          conditionalPanel(
+            condition = paste0("input['", ns("clustering-showClusteringOptions"), "'] == true"),
+            tabsetPanel(
+              tabPanel("Cluster Visualization", 
+                       br(),
+                       div(style = "position: relative;",
+                           plotlyOutput(ns("clusterPlot"), height = "600px"))
+              ),
+              tabPanel("Cluster Profiles", 
+                       br(),
+                       shinycssloaders::withSpinner(plotOutput(ns("clusterHeatmap")))),
+              tabPanel("Cluster Statistics", 
+                       br(),
+                       DT::dataTableOutput(ns("clusterStats"))),
+              tabPanel("Identified Populations", 
+                       br(),
+                       DT::dataTableOutput(ns("populationTable")))
+            )
+          ),
+          conditionalPanel(
+            condition = paste0("input['", ns("clustering-showClusteringOptions"), "'] != true"),
+            div(class = "alert alert-info", style = "margin: 15px;",
+                icon("info-circle"), 
+                h5("Clustering Analysis Disabled"),
+                p("Enable clustering analysis in the sidebar to view cluster results.")
+            )
+          )
         )
       )
     )

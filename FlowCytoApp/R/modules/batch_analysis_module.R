@@ -6,291 +6,476 @@
 batchAnalysisModuleUI <- function(id) {
   ns <- NS(id)
   
-  sidebarLayout(
-    sidebarPanel(
-      h4("Sample Management"),
-      # Sample File Upload and Group Assignment
-      fileInput(ns("batchFile"), "Upload FCS/CSV/TSV File", accept = c(".fcs", ".csv", ".tsv"), multiple = TRUE),
-      uiOutput(ns("batchSampleList")),  # Dynamic UI for sample list and group assignment
-      actionButton(ns("addSample"), "Add Selected Files", class = "btn-info"),
-      hr(),
-      
-      # Sample Grouping Options
-      selectInput(ns("groupingVariable"), "Group Samples By:",
-                  choices = c("Manual Assignment", "Filename Pattern"),
-                  selected = "Manual Assignment"),
-      conditionalPanel(
-        condition = paste0("input['", ns("groupingVariable"), "'] === 'Filename Pattern'"),
-        textInput(ns("patternControl"), "Control Pattern", value = "control|ctrl"),
-        textInput(ns("patternTreated"), "Treated Pattern", value = "treated|sample")
-      ),
-      hr(),
-      
-      # Common Analysis Parameters
-      h4("Analysis Parameters"),
-      uiOutput(ns("batchMarkerSelectUI")),
-      
-      # Preprocessing options (same for all samples)
-      checkboxInput(ns("batchTransform"), "Apply arcsinh transformation", value = TRUE),
-      numericInput(ns("batchCofactor"), "Transformation cofactor", value = 5, min = 1, max = 10),
-      numericInput(ns("batchEvents"), "Events per sample", value = 5000, min = 100, step = 1000),
-      
-      # Show advanced preprocessing
-      checkboxInput(ns("showBatchPreprocessing"), "Show Advanced Preprocessing", value = FALSE),
-      conditionalPanel(
-        condition = paste0("input['", ns("showBatchPreprocessing"), "'] === true"),
-        # QC options
-        h5("Quality Control"),
-        checkboxInput(ns("batchPerformQC"), "Perform Quality Control", value = TRUE),
-        conditionalPanel(
-          condition = paste0("input['", ns("showBatchPreprocessing"), "'] === true && input['", ns("batchPerformQC"), "'] === true"),
-          numericInput(ns("batchMaxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
-        ),
-        
-        # Gating options
-        h5("Gating"),
-        checkboxInput(ns("batchPerformGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
-        conditionalPanel(
-          condition = paste0("input['", ns("showBatchPreprocessing"), "'] === true && input['", ns("batchPerformGating"), "'] === true"),
-          textInput(ns("batchDebrisGate"), "FSC/SSC Parameters (comma-separated)", 
-                    value = "FSC-A,SSC-A"),
-          selectInput(ns("batchLiveDeadGate"), "Live/Dead Parameter", 
-                      choices = c("None", "Live Dead BV570 Violet-610-A"),
-                      selected = "None")
-        )
-      ),
-      
-      # Dimensionality Reduction
-      h5("Dimensionality Reduction"),
-      selectInput(ns("batchDimRedMethod"), "Method", 
-                  choices = c("t-SNE", "UMAP", "PCA", "MDS"), selected = "t-SNE"),
-      conditionalPanel(
-        condition = paste0("input['", ns("batchDimRedMethod"), "'] === 't-SNE'"),
-        sliderInput(ns("batchPerplexity"), "t-SNE perplexity", min = 5, max = 50, value = 30),
-        checkboxInput(ns("batch_use_barnes_hut"), "Use Barnes-Hut Approximation (faster)", value = TRUE),
-        conditionalPanel(
-          condition = paste0("input['", ns("batch_use_barnes_hut"), "']"),
-          sliderInput(ns("batchTsneTheta"), "Barnes-Hut theta", 
-                      min = 0.0, max = 1.0, value = 0.5, step = 0.1)
-        ),
-        conditionalPanel(
-          condition = paste0("!input['", ns("batch_use_barnes_hut"), "']"),
-          tags$div(class = "alert alert-warning",
-                   "Warning: Exact t-SNE is very slow for datasets > 1000 cells.")
-        ),
-        numericInput(ns("batch_tsne_max_iter"), "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
-      ),
-      conditionalPanel(
-        condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'UMAP'"),
-        sliderInput(ns("batchNeighbors"), "UMAP n_neighbors", min = 2, max = 100, value = 15)
-      ),
-      
-      conditionalPanel(
-        condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'PCA'"),
-        numericInput(ns("batchPcaComponents"), "PCA: Number of Components", value = 2, min = 2, max = 10)
-      ),
-      
-      conditionalPanel(
-        condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'MDS'"),
-        tags$p("MDS does not require additional parameters. It uses Euclidean distances by default."),
-        tags$small("Note: MDS can be slow for large datasets.")
-      ),
-      
-      # Add clustering controls
-      hr(),
-      h4("Clustering Options"),
-      checkboxInput(ns("showBatchClustering"), "Enable Clustering", value = TRUE),
-      
-      conditionalPanel(
-        condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
-        # clustering methods
-        selectInput(ns("batchClusterMethod"), "Clustering Method",
-                    choices = c("K-means", "FlowSOM", "DBSCAN", "Phenograph"),
-                    selected = "FlowSOM"),
-        
-        conditionalPanel(
-          condition = paste0("input['", ns("showBatchClustering"), "'] === true && input['", ns("batchClusterMethod"), "'] === 'K-means'"),
-          numericInput(ns("batchNumClusters"), "Number of Clusters", value = 8, min = 2, max = 30)
-        ),
-        conditionalPanel(
-          condition = paste0("input['", ns("showBatchClustering"), "'] === true && input['", ns("batchClusterMethod"), "'] === 'FlowSOM'"),
-          numericInput(ns("batchSomXdim"), "SOM Grid X dimension", value = 6, min = 2, max = 20),
-          numericInput(ns("batchSomYdim"), "SOM Grid Y dimension", value = 6, min = 2, max = 20),
-          numericInput(ns("batchSomRlen"), "Training iterations", value = 10, min = 5, max = 50, step = 5),
-          numericInput(ns("batchSomClusters"), "Number of clusters", value = 12, min = 2, max = 30)
-        ),
-        conditionalPanel(
-          condition = paste0("input['", ns("showBatchClustering"), "'] === true && input['", ns("batchClusterMethod"), "'] === 'DBSCAN'"),
-          numericInput(ns("batchDbscanEps"), "Epsilon (neighborhood size)", value = 0.5, min = 0.1, max = 5, step = 0.1),
-          numericInput(ns("batchDbscanMinPts"), "MinPts (min samples in neighborhood)", value = 5, min = 3, max = 50)
-        ),
-        conditionalPanel(
-          condition = paste0("input['", ns("showBatchClustering"), "'] === true && input['", ns("batchClusterMethod"), "'] === 'Phenograph'"),
-          numericInput(ns("batchPhenoK"), "k (nearest neighbors)", value = 30, min = 5, max = 100)
-        ),
-        
-        # Population identification
-        checkboxInput(ns("batchIdentifyPops"), "Identify Cell Populations", value = TRUE),
-        checkboxInput(ns("batchShowPopLabels"), "Show Population Labels", value = TRUE),
-        
-        # Population identification thresholds
-        conditionalPanel(
-          condition = paste0("input['", ns("batchIdentifyPops"), "'] === true"),
-          sliderInput(ns("batchHighExpressionThreshold"), "High Expression Threshold",
-                      min = 0, max = 2, value = 0.5, step = 0.1),
-          sliderInput(ns("batchLowExpressionThreshold"), "Low Expression Threshold",
-                      min = -2, max = 0, value = -0.5, step = 0.1),
-          sliderInput(ns("batchMinConfidenceThreshold"), "Minimum Confidence Threshold (%)",
-                      min = 0, max = 100, value = 30, step = 5)
-        ),
-        
-        # Add cluster visualization controls section
-        hr(),
-        h5("Cluster Visualization Controls"),
-        
-        # Show cluster labels checkbox (moved from main panel)
-        div(
-          style = "margin-bottom: 15px;",
-          checkboxInput(ns("showClusterLabels"), "Show Population Labels", value = TRUE)
-        ),
-        
-        # Cluster management buttons (moved from main panel)
-        div(
-          style = "display: flex; flex-direction: column; gap: 10px;",
-          actionButton(ns("showMergeModal"), "Merge Similar Clusters", 
-                    class = "btn-info", icon = icon("object-group"), width = "100%"),
-          actionButton(ns("resetMerging"), "Reset to Original Clusters", 
-                    class = "btn-warning", icon = icon("undo"), width = "100%")
-        )
-      ),
-      
-      # Run button for analysis
-      hr(),
-      actionButton(ns("runBatchAnalysis"), "Run Batch Analysis", class = "btn-primary", 
-                   style = "width: 100%; font-weight: bold;")
+  fluidPage(
+    shinyjs::useShinyjs(),
+    
+    # Enhanced CSS for better styling - matching compensation and gating modules
+    tags$head(
+      tags$style(HTML("
+        .batch-workflow {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          margin-bottom: 20px;
+        }
+        .parameter-group {
+          background-color: #e3f2fd;
+          padding: 10px;
+          border-radius: 5px;
+          margin-bottom: 10px;
+        }
+        .sample-panel {
+          background-color: #f8f9fa;
+          padding: 15px;
+          border-radius: 8px;
+          margin-bottom: 10px;
+          border: 1px solid #dee2e6;
+        }
+        .method-controls {
+          background-color: #f1f8e9;
+          padding: 8px;
+          border-radius: 5px;
+          margin: 5px 0;
+        }
+        .clustering-panel {
+          background-color: #fff3cd;
+          padding: 10px;
+          border-radius: 5px;
+          margin-bottom: 10px;
+        }
+      "))
     ),
     
-    mainPanel(
-      tabsetPanel(
-        tabPanel("Sample Management",
-                 h4("Sample Groups"),
-                 DT::dataTableOutput(ns("batchSampleTable")),
-                 hr(),
-                 fluidRow(
-                   column(12, h4("Sample Management Actions")),
-                   column(4, actionButton(ns("clearSamples"), "Clear All Samples", class = "btn-warning", style = "width: 100%")),
-                   column(4, downloadButton(ns("downloadSampleConfig"), "Save Sample Config", style = "width: 100%")),
-                   column(4, div(style = "width: 100%", fileInput(ns("uploadSampleConfig"), "Load Config", accept = c(".csv"))))
-                 )
+    # Workflow Progress Header
+    div(class = "batch-workflow",
+        h3(icon("layer-group"), "Batch Analysis Workflow"),
+        p("Upload multiple samples, configure batch processing parameters, and compare across groups")
+    ),
+    
+    fluidRow(
+      # Left Panel - Enhanced Controls with shinydashboard boxes
+      column(3,
+        # Sample Management Section
+        shinydashboard::box(
+          title = "Sample Management", status = "primary", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          div(class = "sample-panel",
+            h5(icon("upload"), "File Upload"),
+            fileInput(ns("batchFile"), "Upload FCS/CSV/TSV Files", 
+                      accept = c(".fcs", ".csv", ".tsv"), 
+                      multiple = TRUE,
+                      buttonLabel = "Browse Files...",
+                      placeholder = "No files selected"),
+            
+            helpText(icon("info-circle"), 
+                     "Upload multiple flow cytometry files for batch analysis."),
+            
+            # Dynamic UI for sample list and group assignment
+            uiOutput(ns("batchSampleList")),
+            
+            actionButton(ns("addSample"), "Add Selected Files", 
+                         class = "btn-info btn-block",
+                         icon = icon("plus"))
+          ),
+          
+          hr(),
+          
+          # Sample Grouping Options
+          div(class = "parameter-group",
+            h5(icon("tags"), "Sample Grouping"),
+            selectInput(ns("groupingVariable"), "Group Samples By:",
+                        choices = c("Manual Assignment", "Filename Pattern"),
+                        selected = "Manual Assignment"),
+            conditionalPanel(
+              condition = paste0("input['", ns("groupingVariable"), "'] === 'Filename Pattern'"),
+              textInput(ns("patternControl"), "Control Pattern", value = "control|ctrl"),
+              textInput(ns("patternTreated"), "Treated Pattern", value = "treated|sample")
+            )
+          )
         ),
         
-        tabPanel("Sample Visualization",
-                 fluidRow(
-                   column(3, selectInput(ns("viewSample"), "Select Sample:", choices = NULL)),
-                   column(9, h4(textOutput(ns("sampleViewTitle")), align = "center"))
-                 ),
-                 hr(),
-                 div(
-                   class = "plot-container-wrapper",
-                   style = "margin-bottom: 250px; position: relative; overflow: visible; padding-bottom: 50px;", # Much larger margin
-                   fluidRow(
-                     column(12, 
-                            h4("Dimensionality Reduction Plot", align = "center"),
-                            shinycssloaders::withSpinner(plotlyOutput(ns("sampleDimensionalityPlot"), height = "600px")))
-                   )
-                 ),
-                 conditionalPanel(
-                   condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
-                   hr(),
-                   # Drastically increase margin for clustering visualization
-                   div(
-                     class = "plot-container-wrapper",
-                     style = "margin-bottom: 300px; position: relative; overflow: visible; padding-bottom: 50px;", # Very large margin
-                     fluidRow(
-                       column(12, h4("Clustering Visualization", align = "center")),
-                       column(6, shinycssloaders::withSpinner(plotlyOutput(ns("sampleClusterPlot"), height = "550px"))),
-                       column(6, shinycssloaders::withSpinner(plotOutput(ns("sampleHeatmap"), height = "550px")))
-                     )
-                   ),
-                   hr(),
-                   # Increase spacing for cluster statistics section
-                   div(
-                     class = "plot-container-wrapper",
-                     style = "margin-bottom: 200px; position: relative; overflow: visible; padding-bottom: 50px;", # Large margin
-                     fluidRow(
-                       column(12, h4("Cluster Statistics", align = "center")),
-                       column(12, shinycssloaders::withSpinner(DT::dataTableOutput(ns("sampleClusterStats"))))
-                     )
-                   ),
-                   hr(),
-                   # Add much more spacing for marker expression section
-                   div(
-                     class = "plot-container-wrapper",
-                     style = "margin-top: 30px; margin-bottom: 250px; position: relative; overflow: visible; padding-bottom: 80px;", # Very large margin
-                     fluidRow(
-                       column(12, h4("Marker Expression by Cluster", align = "center")),
-                       column(4, selectInput(ns("sampleMarkerSelect"), "Select Marker:", choices = NULL)),
-                       column(8, shinycssloaders::withSpinner(plotlyOutput(ns("markerExpressionByCluster"), height = "550px")))
-                     )
-                   )
-                 )
+        # Analysis Parameters Section
+        shinydashboard::box(
+          title = "Analysis Parameters", status = "success", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          # Marker Selection
+          uiOutput(ns("batchMarkerSelectUI")),
+          
+          # Basic transformation options
+          div(class = "parameter-group",
+            h5(icon("magic"), "Data Transformation"),
+            checkboxInput(ns("batchTransform"), "Apply arcsinh transformation", value = TRUE),
+            numericInput(ns("batchCofactor"), "Transformation cofactor", value = 5, min = 1, max = 10),
+            numericInput(ns("batchEvents"), "Events per sample", value = 5000, min = 100, step = 1000)
+          )
         ),
         
-        tabPanel("Control vs Treated", 
-                 fluidRow(
-                   column(12, h4("Sample Comparison", align = "center")),
-                   column(6, selectInput(ns("compareViewControl"), "Control Sample:", choices = NULL)),
-                   column(6, selectInput(ns("compareViewTreated"), "Treated Sample:", choices = NULL))
-                 ),
-                 hr(),
-                 # Drastically increase spacing for Control vs Treated dimensionality reduction plots
-                 div(
-                   class = "plot-container-wrapper",
-                   style = "margin-top: 20px; margin-bottom: 300px; position: relative; overflow: visible; padding-bottom: 50px;", # Much larger margin
-                   fluidRow(
-                     column(12, h4("Dimensionality Reduction Comparison", align = "center")),
-                     column(6, shinycssloaders::withSpinner(plotlyOutput(ns("controlSamplePlot"), height = "600px"))),
-                     column(6, shinycssloaders::withSpinner(plotlyOutput(ns("treatedSamplePlot"), height = "600px")))
-                   )
-                 )
+        # Advanced Preprocessing Section
+        shinydashboard::box(
+          title = "Advanced Preprocessing", status = "warning", solidHeader = TRUE,
+          width = 12, collapsible = TRUE, collapsed = TRUE,
+          
+          checkboxInput(ns("showBatchPreprocessing"), "Enable Advanced Preprocessing", value = FALSE),
+          
+          conditionalPanel(
+            condition = paste0("input['", ns("showBatchPreprocessing"), "'] === true"),
+            
+            # QC options
+            div(class = "parameter-group",
+              h5(icon("shield-alt"), "Quality Control"),
+              checkboxInput(ns("batchPerformQC"), "Perform Quality Control", value = TRUE),
+              conditionalPanel(
+                condition = paste0("input['", ns("batchPerformQC"), "'] === true"),
+                numericInput(ns("batchMaxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
+              )
+            ),
+            
+            # Gating options
+            div(class = "parameter-group",
+              h5(icon("filter"), "Cell Gating"),
+              checkboxInput(ns("batchPerformGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
+              conditionalPanel(
+                condition = paste0("input['", ns("batchPerformGating"), "'] === true"),
+                textInput(ns("batchDebrisGate"), "FSC/SSC Parameters (comma-separated)", 
+                          value = "FSC-A,SSC-A"),
+                selectInput(ns("batchLiveDeadGate"), "Live/Dead Parameter", 
+                            choices = c("None", "Live Dead BV570 Violet-610-A"),
+                            selected = "None")
+              )
+            )
+          )
         ),
         
-        tabPanel("Cluster Comparison",
-                 conditionalPanel(
-                   condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
-                   fluidRow(
-                     column(6, selectInput(ns("clusterCompareControl"), "Control Sample:", choices = NULL)),
-                     column(6, selectInput(ns("clusterCompareTreated"), "Treated Sample:", choices = NULL))
-                   ),
-                   hr(),
-                   # Added container with spacing for the cluster mapping heatmap
-                   div(
-                     class = "plot-container-wrapper",
-                     style = "margin-bottom: 250px; position: relative; overflow: visible; padding-bottom: 80px;", # Much larger margin
-                     fluidRow(
-                       column(12, 
-                              h4("Cluster Mapping", align = "center"),
-                              p("Visualize how clusters from Control and Treated samples relate to each other based on marker expression similarity"),
-                              shinycssloaders::withSpinner(plotOutput(ns("clusterMappingHeatmap"), height = "650px")))
-                     )
-                   ),
-
-                   hr(),
-                   # Add much larger margins for signature markers heatmap
-                   div(
-                     class = "plot-container-wrapper",
-                     style = "margin-top: 30px; margin-bottom: 300px; position: relative; overflow: visible; padding-bottom: 80px;", # Much larger margin
-                     fluidRow(
-                       column(12, h4("Signature Markers by Cluster", align = "center")),
-                       column(12, shinycssloaders::withSpinner(plotOutput(ns("signatureMarkerHeatmap"), height = "650px")))
-                     )
-                   )
-                 ),
-                 conditionalPanel(
-                   condition = paste0("!input['", ns("showBatchClustering"), "']"),
-                   h3("Clustering must be enabled to use this feature", align = "center", 
-                      style = "margin-top: 100px; color: #888;")
-                 )
+        # Dimensionality Reduction Section
+        shinydashboard::box(
+          title = "Dimensionality Reduction", status = "info", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          div(class = "parameter-group",
+            h5(icon("project-diagram"), "Method Selection"),
+            selectInput(ns("batchDimRedMethod"), "Reduction Method", 
+                        choices = c("t-SNE", "UMAP", "PCA", "MDS"), selected = "t-SNE")
+          ),
+          
+          # t-SNE parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("batchDimRedMethod"), "'] === 't-SNE'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "t-SNE Parameters"),
+              sliderInput(ns("batchPerplexity"), "Perplexity", min = 5, max = 50, value = 30),
+              checkboxInput(ns("batch_use_barnes_hut"), "Use Barnes-Hut Approximation (faster)", value = TRUE),
+              conditionalPanel(
+                condition = paste0("input['", ns("batch_use_barnes_hut"), "']"),
+                sliderInput(ns("batchTsneTheta"), "Barnes-Hut theta", 
+                            min = 0.0, max = 1.0, value = 0.5, step = 0.1)
+              ),
+              conditionalPanel(
+                condition = paste0("!input['", ns("batch_use_barnes_hut"), "']"),
+                div(class = "alert alert-warning", style = "padding: 8px; margin: 5px 0;",
+                    icon("exclamation-triangle"), " Exact t-SNE is very slow for datasets > 1000 cells.")
+              ),
+              numericInput(ns("batch_tsne_max_iter"), "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
+            )
+          ),
+          
+          # UMAP parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'UMAP'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "UMAP Parameters"),
+              sliderInput(ns("batchNeighbors"), "n_neighbors", min = 2, max = 100, value = 15)
+            )
+          ),
+          
+          # PCA parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'PCA'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "PCA Parameters"),
+              numericInput(ns("batchPcaComponents"), "Number of Components", value = 2, min = 2, max = 10)
+            )
+          ),
+          
+          # MDS parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("batchDimRedMethod"), "'] === 'MDS'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "MDS Parameters"),
+              p("MDS uses Euclidean distances by default."),
+              tags$small("Note: MDS can be slow for large datasets.")
+            )
+          )
+        ),
+        
+        # Clustering Options Section
+        shinydashboard::box(
+          title = "Clustering Analysis", status = "success", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          checkboxInput(ns("showBatchClustering"), "Enable Clustering", value = TRUE),
+          
+          conditionalPanel(
+            condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
+            
+            # Clustering method selection
+            div(class = "clustering-panel",
+              h5(icon("sitemap"), "Clustering Method"),
+              selectInput(ns("batchClusterMethod"), "Algorithm:",
+                          choices = c("K-means", "FlowSOM", "DBSCAN", "Phenograph"),
+                          selected = "FlowSOM")
+            ),
+            
+            # Method-specific parameters
+            conditionalPanel(
+              condition = paste0("input['", ns("batchClusterMethod"), "'] === 'K-means'"),
+              div(class = "method-controls",
+                h6(icon("cog"), "K-means Parameters"),
+                numericInput(ns("batchNumClusters"), "Number of Clusters", value = 8, min = 2, max = 30)
+              )
+            ),
+            conditionalPanel(
+              condition = paste0("input['", ns("batchClusterMethod"), "'] === 'FlowSOM'"),
+              div(class = "method-controls",
+                h6(icon("cog"), "FlowSOM Parameters"),
+                numericInput(ns("batchSomXdim"), "SOM Grid X dimension", value = 6, min = 2, max = 20),
+                numericInput(ns("batchSomYdim"), "SOM Grid Y dimension", value = 6, min = 2, max = 20),
+                numericInput(ns("batchSomRlen"), "Training iterations", value = 10, min = 5, max = 50, step = 5),
+                numericInput(ns("batchSomClusters"), "Number of clusters", value = 12, min = 2, max = 30)
+              )
+            ),
+            conditionalPanel(
+              condition = paste0("input['", ns("batchClusterMethod"), "'] === 'DBSCAN'"),
+              div(class = "method-controls",
+                h6(icon("cog"), "DBSCAN Parameters"),
+                numericInput(ns("batchDbscanEps"), "Epsilon (neighborhood size)", value = 0.5, min = 0.1, max = 5, step = 0.1),
+                numericInput(ns("batchDbscanMinPts"), "MinPts (min samples in neighborhood)", value = 5, min = 3, max = 50)
+              )
+            ),
+            conditionalPanel(
+              condition = paste0("input['", ns("batchClusterMethod"), "'] === 'Phenograph'"),
+              div(class = "method-controls",
+                h6(icon("cog"), "Phenograph Parameters"),
+                numericInput(ns("batchPhenoK"), "k (nearest neighbors)", value = 30, min = 5, max = 100)
+              )
+            ),
+            
+            # Population identification
+            div(class = "parameter-group",
+              h5(icon("search"), "Population Identification"),
+              checkboxInput(ns("batchIdentifyPops"), "Identify Cell Populations", value = TRUE),
+              checkboxInput(ns("batchShowPopLabels"), "Show Population Labels", value = TRUE),
+              
+              conditionalPanel(
+                condition = paste0("input['", ns("batchIdentifyPops"), "'] === true"),
+                sliderInput(ns("batchHighExpressionThreshold"), "High Expression Threshold",
+                            min = 0, max = 2, value = 0.5, step = 0.1),
+                sliderInput(ns("batchLowExpressionThreshold"), "Low Expression Threshold",
+                            min = -2, max = 0, value = -0.5, step = 0.1),
+                sliderInput(ns("batchMinConfidenceThreshold"), "Minimum Confidence Threshold (%)",
+                            min = 0, max = 100, value = 30, step = 5)
+              )
+            ),
+            
+            # Cluster visualization controls
+            div(class = "parameter-group",
+              h5(icon("eye"), "Visualization Controls"),
+              checkboxInput(ns("showClusterLabels"), "Show Population Labels", value = TRUE),
+              
+              fluidRow(
+                column(6,
+                  actionButton(ns("showMergeModal"), "Merge Clusters", 
+                               class = "btn-info btn-sm", 
+                               icon = icon("object-group"),
+                               style = "width: 100%;")
+                ),
+                column(6,
+                  actionButton(ns("resetMerging"), "Reset Clusters", 
+                               class = "btn-warning btn-sm", 
+                               icon = icon("undo"),
+                               style = "width: 100%;")
+                )
+              )
+            )
+          )
+        ),
+        
+        # Execute Analysis Section
+        shinydashboard::box(
+          title = "Execute Analysis", status = "primary", solidHeader = TRUE,
+          width = 12,
+          
+          actionButton(ns("runBatchAnalysis"), "Run Batch Analysis", 
+                       class = "btn-primary btn-lg",
+                       icon = icon("play"),
+                       style = "width: 100%; font-weight: bold;")
+        )
+      ),
+      # Main Analysis Panel - Enhanced with shinydashboard boxes
+      column(9,
+        # Sample Management Panel
+        shinydashboard::box(
+          title = "Sample Management", status = "primary", solidHeader = TRUE,
+          width = 12,
+          
+          tabsetPanel(
+            tabPanel("Sample Overview",
+              br(),
+              shinydashboard::box(
+                title = "Sample Groups", status = "info", solidHeader = TRUE,
+                width = 12,
+                DT::dataTableOutput(ns("batchSampleTable"))
+              ),
+              
+              shinydashboard::box(
+                title = "Sample Management Actions", status = "warning", solidHeader = TRUE,
+                width = 12,
+                fluidRow(
+                  column(4, 
+                    actionButton(ns("clearSamples"), "Clear All Samples", 
+                                 class = "btn-warning",
+                                 icon = icon("trash"),
+                                 style = "width: 100%")
+                  ),
+                  column(4, 
+                    downloadButton(ns("downloadSampleConfig"), "Save Sample Config", 
+                                   class = "btn-success",
+                                   icon = icon("save"),
+                                   style = "width: 100%")
+                  ),
+                  column(4, 
+                    fileInput(ns("uploadSampleConfig"), "Load Config", 
+                              accept = c(".csv"),
+                              buttonLabel = "Load Config",
+                              placeholder = "Choose CSV file")
+                  )
+                )
+              )
+            ),
+            
+            tabPanel("Sample Visualization",
+              br(),
+              # Sample Selection
+              shinydashboard::box(
+                title = "Sample Selection", status = "primary", solidHeader = TRUE,
+                width = 12,
+                fluidRow(
+                  column(4, selectInput(ns("viewSample"), "Select Sample:", choices = NULL)),
+                  column(8, h4(textOutput(ns("sampleViewTitle")), align = "center"))
+                )
+              ),
+              
+              # Dimensionality Reduction Plot
+              shinydashboard::box(
+                title = "Dimensionality Reduction Visualization", status = "success", solidHeader = TRUE,
+                width = 12,
+                shinycssloaders::withSpinner(plotlyOutput(ns("sampleDimensionalityPlot"), height = "600px"))
+              ),
+              
+              # Clustering Results (conditional)
+              conditionalPanel(
+                condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
+                
+                # Clustering Visualization
+                shinydashboard::box(
+                  title = "Clustering Analysis", status = "warning", solidHeader = TRUE,
+                  width = 12,
+                  fluidRow(
+                    column(6, shinycssloaders::withSpinner(plotlyOutput(ns("sampleClusterPlot"), height = "550px"))),
+                    column(6, shinycssloaders::withSpinner(plotOutput(ns("sampleHeatmap"), height = "550px")))
+                  )
+                ),
+                
+                # Cluster Statistics
+                shinydashboard::box(
+                  title = "Cluster Statistics", status = "info", solidHeader = TRUE,
+                  width = 12,
+                  shinycssloaders::withSpinner(DT::dataTableOutput(ns("sampleClusterStats")))
+                ),
+                
+                # Marker Expression Analysis
+                shinydashboard::box(
+                  title = "Marker Expression by Cluster", status = "success", solidHeader = TRUE,
+                  width = 12,
+                  fluidRow(
+                    column(4, selectInput(ns("sampleMarkerSelect"), "Select Marker:", choices = NULL)),
+                    column(8, shinycssloaders::withSpinner(plotlyOutput(ns("markerExpressionByCluster"), height = "550px")))
+                  )
+                )
+              )
+            ),
+            
+            tabPanel("Control vs Treated Comparison",
+              br(),
+              # Sample Selection for Comparison
+              shinydashboard::box(
+                title = "Sample Comparison Setup", status = "primary", solidHeader = TRUE,
+                width = 12,
+                fluidRow(
+                  column(6, selectInput(ns("compareViewControl"), "Control Sample:", choices = NULL)),
+                  column(6, selectInput(ns("compareViewTreated"), "Treated Sample:", choices = NULL))
+                )
+              ),
+              
+              # Comparison Visualization
+              shinydashboard::box(
+                title = "Dimensionality Reduction Comparison", status = "success", solidHeader = TRUE,
+                width = 12,
+                fluidRow(
+                  column(6, shinycssloaders::withSpinner(plotlyOutput(ns("controlSamplePlot"), height = "600px"))),
+                  column(6, shinycssloaders::withSpinner(plotlyOutput(ns("treatedSamplePlot"), height = "600px")))
+                )
+              )
+            ),
+            
+            tabPanel("Cluster Comparison Analysis",
+              br(),
+              conditionalPanel(
+                condition = paste0("input['", ns("showBatchClustering"), "'] === true"),
+                
+                # Cluster Comparison Setup
+                shinydashboard::box(
+                  title = "Cluster Comparison Setup", status = "primary", solidHeader = TRUE,
+                  width = 12,
+                  fluidRow(
+                    column(6, selectInput(ns("clusterCompareControl"), "Control Sample:", choices = NULL)),
+                    column(6, selectInput(ns("clusterCompareTreated"), "Treated Sample:", choices = NULL))
+                  )
+                ),
+                
+                # Cluster Mapping Analysis
+                shinydashboard::box(
+                  title = "Cluster Relationship Mapping", status = "warning", solidHeader = TRUE,
+                  width = 12,
+                  p(icon("info-circle"), "Visualize how clusters from Control and Treated samples relate to each other based on marker expression similarity"),
+                  shinycssloaders::withSpinner(plotOutput(ns("clusterMappingHeatmap"), height = "650px"))
+                ),
+                
+                # Signature Markers Analysis
+                shinydashboard::box(
+                  title = "Signature Markers by Cluster", status = "success", solidHeader = TRUE,
+                  width = 12,
+                  shinycssloaders::withSpinner(plotOutput(ns("signatureMarkerHeatmap"), height = "650px"))
+                )
+              ),
+              
+              conditionalPanel(
+                condition = paste0("!input['", ns("showBatchClustering"), "']"),
+                shinydashboard::box(
+                  title = "Clustering Required", status = "warning", solidHeader = TRUE,
+                  width = 12,
+                  div(class = "alert alert-warning",
+                      style = "text-align: center; margin-top: 50px;",
+                      icon("exclamation-triangle"), 
+                      h4("Clustering must be enabled to use this feature"),
+                      p("Please enable clustering analysis in the sidebar to access cluster comparison tools.")
+                  )
+                )
+              )
+            )
+          )
         )
       )
     )

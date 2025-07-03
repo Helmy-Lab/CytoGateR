@@ -6,44 +6,182 @@
 processedDataModuleUI <- function(id) {
   ns <- NS(id)
   
-  sidebarLayout(
-    sidebarPanel(
-      fileInput(ns("cleanedFile"), "Upload CSV/TSV/Excel File", accept = c(".csv", ".tsv", ".xlsx")),
-      uiOutput(ns("analysis_type_ui")),
-      uiOutput(ns("marker_ui")),
-      uiOutput(ns("treatment_ui")),
-      selectInput(ns("dimred_method"), "Dimensionality Reduction Method", 
-                  choices = c("t-SNE", "UMAP", "PCA", "MDS"), selected = "t-SNE"),
-      conditionalPanel(
-        condition = paste0("input['", ns("dimred_method"), "'] === 't-SNE'"),
-        numericInput(ns("perplexity_cleaned"), "t-SNE: Perplexity", value = 5, min = 2, max = 50)
-      ),
-      conditionalPanel(
-        condition = paste0("input['", ns("dimred_method"), "'] === 'UMAP'"),
-        numericInput(ns("neighbors"), "UMAP: n_neighbors", value = 5, min = 2, max = 100),
-        numericInput(ns("min_dist"), "UMAP: min_dist", value = 0.1, min = 0, max = 1, step = 0.05)
-      ),
-      conditionalPanel(
-        condition = paste0("input['", ns("dimred_method"), "'] === 'PCA'"),
-        numericInput(ns("pca_components"), "PCA: Number of Components", value = 2, min = 2, max = 10)
-      ),
-      conditionalPanel(
-        condition = paste0("input['", ns("dimred_method"), "'] === 'MDS'"),
-        tags$p("MDS does not require additional parameters. It uses Euclidean distances by default."),
-        tags$small("Note: MDS can be slow for large datasets.")
-      ),
-      numericInput(ns("n_clusters"), "Number of Clusters (k-means)", value = 3, min = 1),
-      sliderInput(ns("plot_width"), "Plot Width (px)", min = 300, max = 1200, value = 600, step = 50),
-      sliderInput(ns("plot_height"), "Plot Height (px)", min = 300, max = 1200, value = 600, step = 50),
-      actionButton(ns("run_cleaned"), "Run Analysis", class = "btn-primary")
+  fluidPage(
+    shinyjs::useShinyjs(),
+    
+    # Enhanced CSS for better styling - matching compensation and gating modules
+    tags$head(
+      tags$style(HTML("
+        .processed-workflow {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          margin-bottom: 20px;
+        }
+        .parameter-group {
+          background-color: #e3f2fd;
+          padding: 10px;
+          border-radius: 5px;
+          margin-bottom: 10px;
+        }
+        .analysis-panel {
+          background-color: #f8f9fa;
+          padding: 15px;
+          border-radius: 8px;
+          margin-bottom: 10px;
+          border: 1px solid #dee2e6;
+        }
+        .method-controls {
+          background-color: #f1f8e9;
+          padding: 8px;
+          border-radius: 5px;
+          margin: 5px 0;
+        }
+      "))
     ),
-    mainPanel(
-      tabsetPanel(
-        tabPanel("Data Preview", DT::DTOutput(ns("preview"))),
-        tabPanel("Structure Detection", verbatimTextOutput(ns("structure"))),
-        tabPanel("Results Plot", plotlyOutput(ns("plot"))),
-        tabPanel("t-SNE / UMAP / PCA / MDS", plotlyOutput(ns("dimred_plot"), width = "auto", height = "auto")),
-        tabPanel("Summary Table", DT::DTOutput(ns("summary_table")))
+    
+    # Workflow Progress Header
+    div(class = "processed-workflow",
+        h3(icon("table"), "Processed Data Analysis Workflow"),
+        p("Upload cleaned data files, configure analysis parameters, and explore statistical results")
+    ),
+    
+    fluidRow(
+      # Left Panel - Enhanced Controls with shinydashboard boxes
+      column(3,
+        # Data Upload Section
+        shinydashboard::box(
+          title = "Data Upload", status = "primary", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          fileInput(ns("cleanedFile"), "Upload CSV/TSV/Excel File", 
+                    accept = c(".csv", ".tsv", ".xlsx"),
+                    buttonLabel = "Browse Files...",
+                    placeholder = "No file selected"),
+          
+          helpText(icon("info-circle"), 
+                   "Supported formats: CSV, TSV, and Excel files with processed flow cytometry data."),
+          
+          # Dynamic UI elements
+          uiOutput(ns("analysis_type_ui")),
+          uiOutput(ns("marker_ui")),
+          uiOutput(ns("treatment_ui"))
+        ),
+        
+        # Analysis Configuration Section
+        shinydashboard::box(
+          title = "Analysis Configuration", status = "success", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          # Dimensionality Reduction Method
+          div(class = "parameter-group",
+            h5(icon("project-diagram"), "Dimensionality Reduction"),
+            selectInput(ns("dimred_method"), "Method:", 
+                        choices = c("t-SNE", "UMAP", "PCA", "MDS"), 
+                        selected = "t-SNE")
+          ),
+          
+          # Method-specific parameters
+          conditionalPanel(
+            condition = paste0("input['", ns("dimred_method"), "'] === 't-SNE'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "t-SNE Parameters"),
+              numericInput(ns("perplexity_cleaned"), "Perplexity:", value = 5, min = 2, max = 50)
+            )
+          ),
+          conditionalPanel(
+            condition = paste0("input['", ns("dimred_method"), "'] === 'UMAP'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "UMAP Parameters"),
+              numericInput(ns("neighbors"), "n_neighbors:", value = 5, min = 2, max = 100),
+              numericInput(ns("min_dist"), "min_dist:", value = 0.1, min = 0, max = 1, step = 0.05)
+            )
+          ),
+          conditionalPanel(
+            condition = paste0("input['", ns("dimred_method"), "'] === 'PCA'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "PCA Parameters"),
+              numericInput(ns("pca_components"), "Number of Components:", value = 2, min = 2, max = 10)
+            )
+          ),
+          conditionalPanel(
+            condition = paste0("input['", ns("dimred_method"), "'] === 'MDS'"),
+            div(class = "method-controls",
+              h6(icon("cog"), "MDS Parameters"),
+              p("MDS uses Euclidean distances by default."),
+              tags$small("Note: MDS can be slow for large datasets.")
+            )
+          )
+        ),
+        
+        # Clustering and Visualization Section
+        shinydashboard::box(
+          title = "Clustering & Visualization", status = "info", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+          
+          # Clustering options
+          div(class = "parameter-group",
+            h5(icon("sitemap"), "Clustering"),
+            numericInput(ns("n_clusters"), "Number of Clusters (k-means):", value = 3, min = 1)
+          ),
+          
+          # Plot dimensions
+          div(class = "parameter-group",
+            h5(icon("expand-arrows-alt"), "Plot Dimensions"),
+            sliderInput(ns("plot_width"), "Plot Width (px):", 
+                        min = 300, max = 1200, value = 600, step = 50),
+            sliderInput(ns("plot_height"), "Plot Height (px):", 
+                        min = 300, max = 1200, value = 600, step = 50)
+          )
+        ),
+        
+        # Execute Analysis Section
+        shinydashboard::box(
+          title = "Execute Analysis", status = "primary", solidHeader = TRUE,
+          width = 12,
+          
+          actionButton(ns("run_cleaned"), "Run Analysis", 
+                       class = "btn-primary btn-lg",
+                       icon = icon("play"),
+                       style = "width: 100%; font-weight: bold;")
+        )
+      ),
+      
+      # Main Analysis Panel - Enhanced with shinydashboard boxes
+      column(9,
+        # Data Overview Section
+        shinydashboard::box(
+          title = "Data Overview", status = "primary", solidHeader = TRUE,
+          width = 12,
+          
+          tabsetPanel(
+            tabPanel("Data Preview", 
+                     br(),
+                     DT::DTOutput(ns("preview"))),
+            tabPanel("Structure Detection", 
+                     br(),
+                     verbatimTextOutput(ns("structure")))
+          )
+        ),
+        
+        # Analysis Results Section
+        shinydashboard::box(
+          title = "Analysis Results", status = "success", solidHeader = TRUE,
+          width = 12,
+          
+          tabsetPanel(
+            tabPanel("Statistical Analysis", 
+                     br(),
+                     plotlyOutput(ns("plot"))),
+            tabPanel("Dimensionality Reduction", 
+                     br(),
+                     plotlyOutput(ns("dimred_plot"), width = "auto", height = "auto")),
+            tabPanel("Summary Statistics", 
+                     br(),
+                     DT::DTOutput(ns("summary_table")))
+          )
+        )
       )
     )
   )
