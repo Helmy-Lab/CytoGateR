@@ -38,6 +38,7 @@ library(flowMatch)
 library(MASS)  # For density estimation in gating
 library(gridExtra)  # For arranging multiple plots
 library(ggpointdensity)  # For point density coloring
+library(scattermore)
 
 # Set global options
 options(shiny.maxRequestSize = 250*1024^2)
