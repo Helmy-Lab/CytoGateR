@@ -30,10 +30,10 @@ library(igraph)
 library(flowAI)
 library(flowDensity)
 library(flowStats)  # For spillover compensation
-suppressPackageStartupMessages(library(openCyto))
-suppressPackageStartupMessages(library(flowClust))
-suppressPackageStartupMessages(library(flowWorkspace))  # For GatingSet functionality
-suppressPackageStartupMessages(library(ggcyto))  # For ggplot2-based flow cytometry plotting
+library(openCyto)
+library(flowClust)
+library(flowWorkspace)  # For GatingSet functionality
+library(ggcyto)  # For ggplot2-based flow cytometry plotting
 library(flowMatch)
 library(MASS)  # For density estimation in gating
 library(gridExtra)  # For arranging multiple plots

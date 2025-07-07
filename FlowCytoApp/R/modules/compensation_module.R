@@ -56,9 +56,10 @@ compensationModuleUI <- function(id) {
         "))
       ),
       
-      # Workflow Progress Indicator
+      # Workflow Progress Header
       div(class = "compensation-workflow",
           h3(icon("flask"), "Spillover Compensation Workflow"),
+          p("Upload control files, compute spillover matrices, validate compensation quality, and export compensated data")
       ),
       
       # Main Tabset Panel

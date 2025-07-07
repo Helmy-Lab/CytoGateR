@@ -291,7 +291,20 @@ gatingModuleUI <- function(id) {
           border-radius: 5px;
           margin: 5px 0;
         }
+        .analysis-workflow {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          margin-bottom: 20px;
+        }
       "))
+    ),
+    
+    # Workflow Progress Header
+    div(class = "analysis-workflow",
+        h3(icon("vector-square"), "Interactive Gating Workflow"),
+        p("Create gates to define cell populations, build gating hierarchies, and extract gated data for analysis")
     ),
     
     fluidRow(
