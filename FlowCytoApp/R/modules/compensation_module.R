@@ -186,13 +186,32 @@ compensationModuleUI <- function(id) {
                                 column(6,
                                        checkboxInput(ns("enable_editing"), 
                                                      "Enable Matrix Editing", 
-                                                     value = FALSE)
+                                                     value = FALSE),
+                                       # Editing status indicator
+                                       conditionalPanel(
+                                         condition = paste0("input['", ns("enable_editing"), "'] == true"),
+                                         div(class = "alert alert-info", style = "margin-top: 5px; padding: 5px 8px; font-size: 12px;",
+                                             icon("edit"), 
+                                             " Double-click cells to edit matrix values")
+                                       ),
+                                       conditionalPanel(
+                                         condition = paste0("input['", ns("enable_editing"), "'] == false"),
+                                         div(class = "alert alert-secondary", style = "margin-top: 5px; padding: 5px 8px; font-size: 12px;",
+                                             icon("lock"), 
+                                             " Matrix editing disabled")
+                                       )
                                 ),
                                 column(6,
-                                       actionButton(ns("reset_matrix"), 
-                                                    "Reset to Original",
-                                                    class = "btn-warning btn-sm",
-                                                    icon = icon("undo"))
+                                       div(class = "btn-group", role = "group",
+                                           actionButton(ns("reset_matrix"), 
+                                                        "Reset to Original",
+                                                        class = "btn-warning btn-sm",
+                                                        icon = icon("undo")),
+                                           actionButton(ns("save_edited_matrix"), 
+                                                        "Save Edited Matrix",
+                                                        class = "btn-success btn-sm",
+                                                        icon = icon("floppy-disk"))
+                                       )
                                 )
                               ),
                               
@@ -334,6 +353,16 @@ compensationModuleUI <- function(id) {
                             
                             h5(icon("file"), "Compensated FCS Files:"),
                             
+                            # Status indicator for compensated files
+                            conditionalPanel(
+                              condition = paste0("output['", ns("matrix_validation"), "'] != null"),
+                              div(id = ns("compensation_status"),
+                                  shinycssloaders::withSpinner(
+                                    verbatimTextOutput(ns("compensation_file_status"))
+                                  )
+                              )
+                            ),
+                            
                             checkboxInput(ns("add_suffix"), 
                                           "Add '_compensated' suffix", 
                                           value = TRUE),
@@ -342,11 +371,27 @@ compensationModuleUI <- function(id) {
                                           "Include control files", 
                                           value = FALSE),
                             
-                            downloadButton(ns("download_compensated_fcs"), 
-                                           "Download Compensated FCS Files",
-                                           class = "btn-success btn-lg",
-                                           icon = icon("download"),
-                                           style = "width: 100%; margin-bottom: 15px;"),
+                            conditionalPanel(
+                              condition = paste0("output['", ns("compensation_file_status"), "'].indexOf('ready') > -1"),
+                              downloadButton(ns("download_compensated_fcs"), 
+                                             "Download Compensated FCS Files",
+                                             class = "btn-success btn-lg",
+                                             icon = icon("download"),
+                                             style = "width: 100%; margin-bottom: 15px;")
+                            ),
+                            
+                            conditionalPanel(
+                              condition = paste0("output['", ns("compensation_file_status"), "'].indexOf('ready') == -1 && output['", ns("matrix_validation"), "'] != null"),
+                              div(class = "alert alert-info",
+                                  icon("info-circle"), 
+                                  " Compensated files will be generated automatically after matrix computation."),
+                              br(),
+                              actionButton(ns("generate_compensated"), 
+                                          "Generate Compensated Files Now",
+                                          class = "btn-info",
+                                          icon = icon("cogs"),
+                                          style = "width: 100%;")
+                            ),
                             
                             hr(),
                             
@@ -1413,6 +1458,52 @@ compensationModuleServer <- function(id, app_state) {
       })
     })
     
+    # Handle pre-computed spillover matrix upload
+    observeEvent(input$matrix_upload, {
+      req(input$matrix_upload)
+      
+      tryCatch({
+        # Read CSV or Excel file
+        ext <- tools::file_ext(input$matrix_upload$name)
+        if (ext == "csv") {
+          spillover_matrix <- read.csv(input$matrix_upload$datapath, row.names = 1)
+        } else if (ext %in% c("xlsx", "xls")) {
+          spillover_matrix <- openxlsx::read.xlsx(input$matrix_upload$datapath, rowNames = TRUE)
+        } else {
+          stop("Unsupported file format. Please use CSV or Excel files.")
+        }
+        
+        spillover_matrix <- as.matrix(spillover_matrix)
+        
+        # Basic validation of matrix structure
+        if (nrow(spillover_matrix) != ncol(spillover_matrix)) {
+          stop("Matrix must be square (same number of rows and columns)")
+        }
+        
+        if (any(is.na(spillover_matrix))) {
+          stop("Matrix contains missing values (NA)")
+        }
+        
+        # Store the spillover matrix
+        values$original_matrix <- spillover_matrix
+        values$current_matrix <- spillover_matrix
+        values$matrix_source <- "uploaded"
+        values$workflow_step <- 4
+        
+        # Clear any existing compensated files since we have a new matrix
+        values$compensated_flowset <- NULL
+        
+        showNotification(paste0("Spillover matrix uploaded successfully!\n",
+                               "Dimensions: ", nrow(spillover_matrix), "×", ncol(spillover_matrix), "\n",
+                               "Channels: ", paste(head(colnames(spillover_matrix), 3), collapse = ", "),
+                               if (ncol(spillover_matrix) > 3) "..." else ""), 
+                        type = "message", duration = 5)
+        
+      }, error = function(e) {
+        showNotification(paste("Error loading spillover matrix:", e$message), type = "error")
+      })
+    })
+    
     # Matrix computation status - SAFE VERSION
     output$computation_status <- renderText({
       tryCatch({
@@ -1484,14 +1575,37 @@ compensationModuleServer <- function(id, app_state) {
       matrix_df <- as.data.frame(round(values$current_matrix, 4))
       matrix_df <- cbind(Channel = rownames(matrix_df), matrix_df)
       
+      # Create proper editable configuration
+      editable_config <- if(input$enable_editing) {
+        list(
+          target = "cell",
+          disable = list(columns = c(0))  # Disable first column (Channel names)
+        )
+      } else {
+        FALSE
+      }
+      
       DT::datatable(
         matrix_df,
         options = list(
           scrollX = TRUE,
           pageLength = 20,
-          editable = if(input$enable_editing) list(target = 'cell', disable = list(columns = 0)) else FALSE
+          editable = editable_config,
+          columnDefs = list(
+            list(className = 'dt-center', targets = 0),
+            list(className = 'dt-right', targets = 1:(ncol(matrix_df)-1))
+          ),
+          # Add additional options for better editing experience
+          dom = 'Bfrtip',
+          ordering = FALSE  # Disable sorting to prevent confusion during editing
         ),
-        rownames = FALSE
+        rownames = FALSE,
+        caption = if(input$enable_editing) {
+          HTML("<strong>Matrix Editor:</strong> Double-click cells to edit values. Diagonal should be ~1.0, off-diagonal <0.5")
+        } else {
+          "Spillover Matrix (Enable editing checkbox above to modify values)"
+        },
+        editable = editable_config  # Also set at top level for compatibility
       ) %>%
         DT::formatRound(columns = 2:ncol(matrix_df), digits = 4) %>%
         DT::formatStyle(
@@ -1500,34 +1614,156 @@ compensationModuleServer <- function(id, app_state) {
             cuts = c(0.01, 0.05, 0.1, 0.2),
             values = c("#e8f5e8", "#fff3cd", "#ffeaa7", "#ff7675", "#d63031")
           )
+        ) %>%
+        DT::formatStyle(
+          columns = 1,  # Channel column
+          backgroundColor = "#f8f9fa",
+          fontWeight = "bold"
         )
     })
     
-    # Handle matrix edits
-    observeEvent(input$matrix_editor_cell_edit, {
-      req(input$enable_editing)
-      
-      info <- input$matrix_editor_cell_edit
-      new_matrix <- values$current_matrix
-      
-      # Update matrix with edited value
-      row_idx <- info$row
-      col_idx <- info$col  # Subtract 1 because first column is Channel names
-      new_value <- as.numeric(info$value)
-      
-      if (!is.na(new_value) && col_idx > 0) {
-        new_matrix[row_idx, col_idx] <- new_value
-        values$current_matrix <- new_matrix
-        
-        showNotification("Matrix updated", type = "message", duration = 2)
+    # Debug: Monitor editing state
+    observe({
+      if (!is.null(input$enable_editing)) {
+        message("Matrix editing enabled: ", input$enable_editing)
       }
     })
     
-    # Reset matrix
+    # Handle matrix edits with improved validation and indexing
+    observeEvent(input$matrix_editor_cell_edit, {
+      message("Matrix edit event triggered!")
+      req(input$enable_editing, values$current_matrix)
+      
+      tryCatch({
+        info <- input$matrix_editor_cell_edit
+        message("Edit info - Row: ", info$row, " Col: ", info$col, " Value: ", info$value)
+        new_matrix <- values$current_matrix
+        
+        # DT uses 0-based column indexing, where column 0 is Channel, 1+ are matrix columns
+        row_idx <- info$row + 1  # Convert from 0-based to 1-based
+        col_idx <- info$col      # Column index in the datatable (0 = Channel, 1+ = matrix)
+        new_value <- as.numeric(info$value)
+        
+        # Validate inputs
+        if (is.na(new_value)) {
+          showNotification("Invalid value - must be a number", type = "error", duration = 3)
+          return()
+        }
+        
+        if (col_idx == 0) {
+          showNotification("Cannot edit channel names", type = "warning", duration = 2)
+          return()
+        }
+        
+        # Convert datatable column index to matrix column index
+        matrix_col_idx <- col_idx  # col_idx 1 -> matrix column 1, etc.
+        
+        # Validate matrix bounds
+        if (row_idx < 1 || row_idx > nrow(new_matrix) || 
+            matrix_col_idx < 1 || matrix_col_idx > ncol(new_matrix)) {
+          showNotification("Edit position out of matrix bounds", type = "error", duration = 3)
+          return()
+        }
+        
+        # Get channel names for validation feedback
+        row_channel <- rownames(new_matrix)[row_idx]
+        col_channel <- colnames(new_matrix)[matrix_col_idx]
+        old_value <- new_matrix[row_idx, matrix_col_idx]
+        
+        # Validate edit makes sense
+        if (new_value < 0) {
+          showNotification("Warning: Negative spillover values are unusual", type = "warning", duration = 4)
+        }
+        
+        if (row_idx == matrix_col_idx && abs(new_value - 1.0) > 0.2) {
+          showNotification(paste("Warning: Diagonal element", row_channel, "should be close to 1.0"), 
+                         type = "warning", duration = 5)
+        }
+        
+        if (row_idx != matrix_col_idx && new_value > 0.5) {
+          showNotification(paste("Warning: High spillover from", col_channel, "to", row_channel, "(>50%)"), 
+                         type = "warning", duration = 5)
+        }
+        
+        # Apply the edit
+        new_matrix[row_idx, matrix_col_idx] <- new_value
+        values$current_matrix <- new_matrix
+        
+        # Clear compensated files since matrix changed
+        values$compensated_flowset <- NULL
+        
+        # Show success feedback with details
+        change_info <- paste0("Updated ", row_channel, " ← ", col_channel, 
+                             ": ", round(old_value, 4), " → ", round(new_value, 4))
+        showNotification(paste("Matrix updated:", change_info), type = "message", duration = 4)
+        
+        # Log the change for debugging
+        message("Matrix edit: ", change_info)
+        
+      }, error = function(e) {
+        showNotification(paste("Error editing matrix:", e$message), type = "error", duration = 5)
+        message("Matrix edit error: ", e$message)
+      })
+    })
+    
+    # Reset matrix to original
     observeEvent(input$reset_matrix, {
       req(values$original_matrix)
-      values$current_matrix <- values$original_matrix
-      showNotification("Matrix reset to original", type = "message")
+      
+      # Check if matrix has been modified
+      if (!identical(values$current_matrix, values$original_matrix)) {
+        values$current_matrix <- values$original_matrix
+        
+        # Clear compensated files since matrix changed
+        values$compensated_flowset <- NULL
+        
+        showNotification("Matrix reset to original values. Compensated files cleared.", 
+                        type = "message", duration = 4)
+        
+        message("Matrix reset to original")
+      } else {
+        showNotification("Matrix is already at original values", type = "message", duration = 2)
+      }
+    })
+    
+    # Save edited matrix
+    observeEvent(input$save_edited_matrix, {
+      req(values$current_matrix)
+      
+      tryCatch({
+        # Check if matrix has been modified
+        if (is.null(values$original_matrix) || identical(values$current_matrix, values$original_matrix)) {
+          showNotification("No changes to save - matrix is unchanged", type = "message", duration = 3)
+          return()
+        }
+        
+        # Save the current matrix as the new original
+        values$original_matrix <- values$current_matrix
+        
+        # Clear compensated files since matrix changed
+        values$compensated_flowset <- NULL
+        
+        # Create a timestamp for the save
+        timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+        
+        showNotification(paste("Matrix saved successfully at", timestamp, "- compensated files will be regenerated"), 
+                        type = "message", duration = 5)
+        
+        # Log the save action
+        message("Matrix saved as new original at ", timestamp)
+        
+        # Show validation of the saved matrix
+        matrix_info <- paste0("Saved matrix: ", nrow(values$current_matrix), " channels, ",
+                             "diagonal range: ", round(min(diag(values$current_matrix)), 3), "-",
+                             round(max(diag(values$current_matrix)), 3),
+                             ", max off-diagonal: ", round(max(values$current_matrix[row(values$current_matrix) != col(values$current_matrix)]), 3))
+        
+        message(matrix_info)
+        
+      }, error = function(e) {
+        showNotification(paste("Error saving matrix:", e$message), type = "error", duration = 5)
+        message("Matrix save error: ", e$message)
+      })
     })
     
     # Matrix validation - SAFE LOGICAL OPERATIONS
@@ -1695,7 +1931,244 @@ compensationModuleServer <- function(id, app_state) {
       values$qc_results$pairwise_plot
     })
     
+    # Apply compensation to all files - triggered when matrix is available
+    observeEvent(values$current_matrix, {
+      # This observer runs after matrix computation/upload to generate compensated files
+      req(values$current_matrix, values$uploaded_files)
+      
+      # Only run if we don't already have compensated files
+      if (!is.null(values$compensated_flowset)) {
+        return()
+      }
+      
+      tryCatch({
+        # Apply compensation to all uploaded files
+        withProgress(message = "Generating compensated FCS files...", value = 0, {
+          compensated_files <- list()
+          comp_obj <- compensation(values$current_matrix)
+          
+          for (i in 1:nrow(values$uploaded_files)) {
+            incProgress(1/nrow(values$uploaded_files), 
+                        detail = paste("Processing", values$uploaded_files$name[i]))
+            
+            # Read the FCS file
+            ff <- read.FCS(values$uploaded_files$datapath[i], transformation = FALSE)
+            
+            # Check if file has the required channels for compensation
+            file_channels <- colnames(ff)
+            matrix_channels <- colnames(values$current_matrix)
+            
+            if (all(matrix_channels %in% file_channels)) {
+              # Apply compensation
+              ff_comp <- compensate(ff, comp_obj)
+              compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+            } else {
+              # Skip files that don't have required channels
+              message("Skipping ", values$uploaded_files$name[i], " - missing required channels")
+            }
+          }
+          
+          # Store compensated flowset
+          if (length(compensated_files) > 0) {
+            values$compensated_flowset <- flowSet(compensated_files)
+            message("Generated ", length(compensated_files), " compensated FCS files")
+          } else {
+            values$compensated_flowset <- NULL
+            showNotification("No files could be compensated - check channel compatibility", 
+                           type = "warning")
+          }
+        })
+      }, error = function(e) {
+        showNotification(paste("Error generating compensated files:", e$message), 
+                        type = "error")
+      })
+    })
+    
+    # Manual compensation generation
+    observeEvent(input$generate_compensated, {
+      req(values$current_matrix, values$uploaded_files)
+      
+      # Clear existing compensated files to force regeneration
+      values$compensated_flowset <- NULL
+      
+      tryCatch({
+        # Apply compensation to all uploaded files
+        withProgress(message = "Manually generating compensated FCS files...", value = 0, {
+          compensated_files <- list()
+          comp_obj <- compensation(values$current_matrix)
+          
+          for (i in 1:nrow(values$uploaded_files)) {
+            incProgress(1/nrow(values$uploaded_files), 
+                        detail = paste("Processing", values$uploaded_files$name[i]))
+            
+            # Read the FCS file
+            ff <- read.FCS(values$uploaded_files$datapath[i], transformation = FALSE)
+            
+            # Check if file has the required channels for compensation
+            file_channels <- colnames(ff)
+            matrix_channels <- colnames(values$current_matrix)
+            
+            if (all(matrix_channels %in% file_channels)) {
+              # Apply compensation
+              ff_comp <- compensate(ff, comp_obj)
+              compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+            } else {
+              # Skip files that don't have required channels
+              message("Skipping ", values$uploaded_files$name[i], " - missing required channels")
+            }
+          }
+          
+          # Store compensated flowset
+          if (length(compensated_files) > 0) {
+            values$compensated_flowset <- flowSet(compensated_files)
+            showNotification(paste("Successfully generated", length(compensated_files), 
+                                  "compensated FCS files"), type = "message")
+          } else {
+            values$compensated_flowset <- NULL
+            showNotification("No files could be compensated - check channel compatibility", 
+                           type = "warning")
+          }
+        })
+      }, error = function(e) {
+        showNotification(paste("Error generating compensated files:", e$message), 
+                        type = "error")
+      })
+    })
+    
+    # Compensation file status
+    output$compensation_file_status <- renderText({
+      # Make this reactive to all relevant changes
+      matrix_available <- !is.null(values$current_matrix)
+      files_available <- !is.null(values$compensated_flowset)
+      matrix_source <- values$matrix_source
+      
+      # Check if matrix is available
+      if (!matrix_available) {
+        return("No spillover matrix available")
+      }
+      
+      # Check if compensated files are ready
+      if (files_available) {
+        n_files <- length(values$compensated_flowset)
+        file_names <- sampleNames(values$compensated_flowset)
+        
+        status_text <- paste0("✓ Compensated files ready for download\n",
+                             "✓ Files processed: ", n_files, "\n",
+                             "✓ Sample files: ", paste(head(file_names, 3), collapse = ", "),
+                             if (n_files > 3) "..." else "", "\n",
+                             "✓ Matrix source: ", ifelse(matrix_source == "computed", "Computed", "Uploaded"), "\n",
+                             "✓ Matrix applied: ", nrow(values$current_matrix), " channels\n",
+                             "✓ Ready to export as ZIP file")
+        return(status_text)
+      }
+      
+      # Check if matrix computation is in progress or matrix exists but no compensated files
+      if (!is.null(values$current_matrix) && is.null(values$compensated_flowset)) {
+        return("⏳ Generating compensated files from spillover matrix...\nThis process runs automatically after matrix computation.")
+      }
+      
+      # Default status
+      return("⚠ Compute spillover matrix first to generate compensated files")
+    })
+    
     # Export functionality ----
+    
+    # Download compensated FCS files
+    output$download_compensated_fcs <- downloadHandler(
+      filename = function() {
+        paste0("compensated_fcs_files_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".zip")
+      },
+      content = function(file) {
+        req(values$compensated_flowset)
+        
+        tryCatch({
+          # Create temporary directory for FCS files
+          temp_dir <- tempdir()
+          fcs_dir <- file.path(temp_dir, "compensated_fcs")
+          if (dir.exists(fcs_dir)) unlink(fcs_dir, recursive = TRUE)
+          dir.create(fcs_dir, recursive = TRUE)
+          
+          # Get sample names
+          sample_names <- sampleNames(values$compensated_flowset)
+          files_written <- 0
+          
+          # Write each compensated FCS file
+          for (sample_name in sample_names) {
+            # Create safe filename
+            safe_name <- gsub("[^A-Za-z0-9._-]", "_", sample_name)
+            
+            # Add suffix if requested
+            if (input$add_suffix) {
+              # Remove .fcs extension if present, add _compensated, then add .fcs back
+              safe_name <- gsub("\\.fcs$", "", safe_name, ignore.case = TRUE)
+              safe_name <- paste0(safe_name, "_compensated.fcs")
+            } else if (!grepl("\\.fcs$", safe_name, ignore.case = TRUE)) {
+              # Add .fcs extension if not present
+              safe_name <- paste0(safe_name, ".fcs")
+            }
+            
+            output_path <- file.path(fcs_dir, safe_name)
+            
+            # Write the compensated FCS file
+            ff_comp <- values$compensated_flowset[[sample_name]]
+            write.FCS(ff_comp, filename = output_path)
+            files_written <- files_written + 1
+          }
+          
+          # Include control files if requested
+          if (input$export_controls && !is.null(values$file_assignments)) {
+            # Apply compensation to control files as well
+            for (assignment_name in names(values$file_assignments)) {
+              control_file_name <- values$file_assignments[[assignment_name]]
+              
+              # Find the control file in uploaded files
+              control_idx <- which(values$uploaded_files$name == control_file_name)
+              if (length(control_idx) > 0) {
+                # Read and compensate control file
+                ff_control <- read.FCS(values$uploaded_files$datapath[control_idx], 
+                                     transformation = FALSE)
+                
+                # Check if it has required channels
+                if (all(colnames(values$current_matrix) %in% colnames(ff_control))) {
+                  ff_control_comp <- compensate(ff_control, compensation(values$current_matrix))
+                  
+                  # Create safe filename for control
+                  control_safe_name <- gsub("[^A-Za-z0-9._-]", "_", control_file_name)
+                  control_safe_name <- gsub("\\.fcs$", "", control_safe_name, ignore.case = TRUE)
+                  control_safe_name <- paste0(control_safe_name, "_compensated_", assignment_name, ".fcs")
+                  
+                  control_output_path <- file.path(fcs_dir, control_safe_name)
+                  write.FCS(ff_control_comp, filename = control_output_path)
+                  files_written <- files_written + 1
+                }
+              }
+            }
+          }
+          
+          # Create ZIP file
+          if (files_written > 0) {
+            fcs_files <- list.files(fcs_dir, pattern = "\\.fcs$", full.names = TRUE)
+            zip(file, files = fcs_files, flags = "-r9X", extras = "-j")
+            
+            showNotification(paste("Successfully exported", files_written, "compensated FCS files"), 
+                           type = "message")
+          } else {
+            # Create an empty file with error message
+            writeLines("No compensated FCS files could be exported", file)
+            showNotification("No compensated FCS files could be exported", type = "error")
+          }
+          
+          # Clean up temporary directory
+          unlink(fcs_dir, recursive = TRUE)
+          
+        }, error = function(e) {
+          # Create error file
+          writeLines(paste("Export error:", e$message), file)
+          showNotification(paste("Error exporting compensated FCS files:", e$message), 
+                          type = "error")
+        })
+      }
+    )
     
     # Session summary
     output$session_summary <- renderText({
@@ -1714,6 +2187,11 @@ compensationModuleServer <- function(id, app_state) {
       if (!is.null(values$current_matrix)) {
         summary_lines <- c(summary_lines, 
                            paste("Matrix computed:", nrow(values$current_matrix), "channels"))
+      }
+      
+      if (!is.null(values$compensated_flowset)) {
+        summary_lines <- c(summary_lines, 
+                           paste("Compensated files ready:", length(values$compensated_flowset), "files"))
       }
       
       if (!is.null(values$qc_results)) {

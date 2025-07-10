@@ -378,39 +378,8 @@ gatingModuleUI <- function(id) {
                         ),
                         selected = "polygon"),
             
-            # Gate type descriptions
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'polygon'"),
-              helpText(icon("info-circle"), "Draw freeform polygon gates by clicking points")
-            ),
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'rectangle'"),
-              helpText(icon("info-circle"), "Draw rectangular gates with 2 diagonal points")
-            ),
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'ellipse'"),
-              helpText(icon("info-circle"), "Draw elliptical gates around populations")
-            ),
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'interval'"),
-              helpText(icon("info-circle"), "Select range on one axis (1D or 2D)")
-            ),
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'threshold'"),
-              helpText(icon("info-circle"), "Select minimum threshold value")
-            ),
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'boundary'"),
-              helpText(icon("info-circle"), "Select maximum boundary value")
-            ),
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'quadrant'"),
-              helpText(icon("info-circle"), "Create 4 quadrant gates with crosshairs")
-            ),
-            conditionalPanel(
-              condition = paste0("input['", ns("gate_type"), "'] == 'web'"),
-              helpText(icon("info-circle"), "Advanced multi-population web gating")
-            )
+            # Gate type description (dynamic)
+            uiOutput(ns("gate_type_description"))
           ),
           
           # Population Name Input
@@ -790,6 +759,28 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
         return(NULL)
       })
     }
+    
+    # Gate type description
+    output$gate_type_description <- renderUI({
+      gate_descriptions <- list(
+        "polygon" = "Draw freeform polygon gates by clicking points",
+        "rectangle" = "Draw rectangular gates with 2 diagonal points", 
+        "ellipse" = "Draw elliptical gates around populations",
+        "interval" = "Select range on one axis (1D or 2D)",
+        "threshold" = "Select minimum threshold value",
+        "boundary" = "Select maximum boundary value", 
+        "quadrant" = "Create 4 quadrant gates with crosshairs",
+        "web" = "Advanced multi-population web gating"
+      )
+      
+      selected_type <- input$gate_type
+      if (is.null(selected_type)) selected_type <- "polygon"
+      
+      description <- gate_descriptions[[selected_type]]
+      if (is.null(description)) description <- "Select a gate type to see instructions"
+      
+      helpText(icon("info-circle"), description)
+    })
     
     # Instruction text output
     output$instruction_text <- renderText({
