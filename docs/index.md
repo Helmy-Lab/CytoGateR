@@ -8,15 +8,15 @@ title: CytoVerse Documentation
 **An Interactive Flow Cytometry Analysis Platform**
 
 ## 📖 Documentation
-- [Complete Manual](docs/cytoverse-manual.md) - Full comprehensive guide
-- [Getting Started](docs/cytoverse-manual.md#getting-started)
-- [Settings](docs/cytoverse-manual.md#settings)
-- [Spillover Compensation](docs/cytoverse-manual.md#spillover-compensation)
-- [Interactive Gating](docs/cytoverse-manual.md#interactive-gating)
-- [Raw Data Analysis](docs/cytoverse-manual.md#raw-data-analysis)
-- [Batch Analysis](docs/cytoverse-manual.md#batch-analysis)
-- [Processed Data](docs/cytoverse-manual.md#processed-data)
-- [Troubleshooting](docs/cytoverse-manual.md#troubleshooting)
+- [Complete Manual](docs/cytoverse_documentation.md) - Full comprehensive guide
+- [Getting Started](docs/cytoverse_documentation.md#getting-started)
+- [Settings](docs/cytoverse_documentation.md.md#settings)
+- [Spillover Compensation](docs/cytoverse_documentation.md.md#spillover-compensation)
+- [Interactive Gating](docs/cytoverse_documentation.md.md#interactive-gating)
+- [Raw Data Analysis](docs/cytoverse_documentation.md.md#raw-data-analysis)
+- [Batch Analysis](docs/cytoverse_documentation.md.md#batch-analysis)
+- [Processed Data](docs/cytoverse_documentation.md.md#processed-data)
+- [Troubleshooting](docs/cytoverse_documentation.md.md#troubleshooting)
 
 ## About CytoVerse
 
