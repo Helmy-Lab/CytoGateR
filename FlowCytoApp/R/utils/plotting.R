@@ -1,5 +1,46 @@
 # Plotting utility functions for Flow Cytometry Analysis
 
+# ============================================================================
+# COLOR PALETTE HELPER FUNCTIONS
+# ============================================================================
+
+# Helper function to get viridis color scale for continuous data
+getViridisColorScale <- function(color_palette, name, option_type = "color") {
+  # Default to plasma if unrecognized palette
+  option <- switch(color_palette,
+                   "plasma" = "plasma",
+                   "viridis" = "viridis", 
+                   "magma" = "magma",
+                   "inferno" = "inferno",
+                   "plasma")  # default
+  
+  if (option_type == "color") {
+    return(scale_color_viridis_c(name = name, option = option))
+  } else if (option_type == "fill") {
+    return(scale_fill_viridis_c(name = name, option = option))
+  } else if (option_type == "fill_discrete") {
+    return(scale_fill_viridis_d(name = name, option = option))
+  }
+}
+
+# Helper function to apply color palette to a ggplot object
+applyColorPalette <- function(plot_obj, color_palette, marker_name, scale_type = "color") {
+  if (scale_type == "color") {
+    return(plot_obj + getViridisColorScale(color_palette, marker_name, "color"))
+  } else if (scale_type == "fill") {
+    return(plot_obj + getViridisColorScale(color_palette, marker_name, "fill"))
+  } else if (scale_type == "both") {
+    # For contour plots that need both color and fill
+    return(plot_obj + 
+           getViridisColorScale(color_palette, paste(marker_name, "Points"), "color") +
+           getViridisColorScale(color_palette, paste(marker_name, "Level"), "fill_discrete"))
+  }
+}
+
+# ============================================================================
+# MAIN PLOTTING FUNCTIONS
+# ============================================================================
+
 # Function to create a dimensionality reduction plot with ggplot2
 createDimReductionPlot <- function(plot_data, dim1, dim2, colorBy = NULL, 
                                    color_palette = "viridis", point_size = 3, font_size = 12,
@@ -514,4 +555,260 @@ createCompensationComparisonPlot <- function(original_data, compensated_data,
       x = channel1, 
       y = channel2
     )
+}
+
+# ============================================================================
+# MARKER EXPRESSION HEATMAP FUNCTIONS
+# ============================================================================
+
+# Function to create marker expression heatmap overlaid on dimensionality reduction
+createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim2 = "tsne2", 
+                                         method = "hex", bins = 50, 
+                                         title = NULL, font_size = 12,
+                                         color_palette = "plasma") {
+  
+  if (is.null(title)) {
+    title <- paste(marker, "Expression Heatmap")
+  }
+  
+  # Check if marker exists in data
+  if (!marker %in% colnames(plot_data)) {
+    stop(paste("Marker", marker, "not found in plot data"))
+  }
+  
+  # Check if dimension columns exist
+  if (!all(c(dim1, dim2) %in% colnames(plot_data))) {
+    stop(paste("Dimension columns", dim1, "and/or", dim2, "not found in plot data"))
+  }
+  
+  # Create heatmap based on method
+  if (method == "hex") {
+    # Hexagonal binning with marker expression as fill - with error handling
+    
+    # Check if we have valid data for binning
+    marker_values <- plot_data[[marker]]
+    valid_values <- marker_values[is.finite(marker_values)]
+    
+    if (length(valid_values) < 10) {
+      # Not enough data for binning, fall back to scatter plot
+      p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], 
+                                 color = .data[[marker]])) +
+        geom_point(alpha = 0.7, size = 0.8) +
+        labs(title = paste(title, "(Scatter - insufficient data for binning)"), 
+             x = dim1, y = dim2) +
+        theme_minimal(base_size = font_size) +
+        coord_fixed()
+      
+      # Apply color palette for scatter
+      p <- applyColorPalette(p, color_palette, marker, "color")
+      
+    } else {
+      # Sufficient data for binning
+      tryCatch({
+        p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], 
+                                   z = .data[[marker]])) +
+          stat_summary_hex(bins = bins, alpha = 0.8, fun = mean) +
+          labs(title = title, x = dim1, y = dim2) +
+          theme_minimal(base_size = font_size) +
+          coord_fixed()
+        
+        # Apply color palette
+        p <- applyColorPalette(p, color_palette, marker, "fill")
+        
+      }, error = function(e) {
+        # If binning fails, fall back to scatter plot
+        p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], 
+                                   color = .data[[marker]])) +
+          geom_point(alpha = 0.7, size = 0.8) +
+          labs(title = paste(title, "(Scatter - binning failed)"), 
+               x = dim1, y = dim2) +
+          theme_minimal(base_size = font_size) +
+          coord_fixed()
+        
+        # Apply color palette for scatter fallback
+        p <- applyColorPalette(p, color_palette, marker, "color")
+        
+        return(p)
+      })
+    }
+      
+  } else if (method == "density2d") {
+    # Density contours with marker expression as color
+    p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]])) +
+      geom_point(aes(color = .data[[marker]]), alpha = 0.6, size = 0.5) +
+      stat_density_2d(alpha = 0.3, color = "white", linewidth = 0.8) +
+      labs(title = title, x = dim1, y = dim2) +
+      theme_minimal(base_size = font_size) +
+      coord_fixed()
+    
+    # Apply color palette
+    p <- applyColorPalette(p, color_palette, marker, "color")
+      
+  } else if (method == "contour") {
+    # Filled contours based on marker expression - with error handling
+    
+    # Check if we have valid data for contours
+    marker_values <- plot_data[[marker]]
+    valid_values <- marker_values[is.finite(marker_values)]
+    
+    if (length(valid_values) < 10 || length(unique(valid_values)) < 3) {
+      # Not enough variation for contours, fall back to scatter plot
+      p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], 
+                                 color = .data[[marker]])) +
+        geom_point(alpha = 0.7, size = 0.8) +
+        labs(title = paste(title, "(Scatter - insufficient data for contours)"), 
+             x = dim1, y = dim2) +
+        theme_minimal(base_size = font_size) +
+        coord_fixed()
+      
+      # Apply color palette for scatter
+      p <- applyColorPalette(p, color_palette, marker, "color")
+      
+    } else {
+      # Sufficient data for contours
+      tryCatch({
+        p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], 
+                                   z = .data[[marker]])) +
+          geom_point(aes(color = .data[[marker]]), alpha = 0.4, size = 0.5) +
+          stat_contour_filled(alpha = 0.6, bins = 15) +
+          labs(title = title, x = dim1, y = dim2) +
+          theme_minimal(base_size = font_size) +
+          coord_fixed()
+        
+        # Apply color palettes
+        p <- applyColorPalette(p, color_palette, marker, "both")
+        
+      }, error = function(e) {
+        # If contour generation fails, fall back to scatter plot
+        p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], 
+                                   color = .data[[marker]])) +
+          geom_point(alpha = 0.7, size = 0.8) +
+          labs(title = paste(title, "(Scatter - contour generation failed)"), 
+               x = dim1, y = dim2) +
+          theme_minimal(base_size = font_size) +
+          coord_fixed()
+        
+        # Apply color palette for scatter fallback
+        p <- applyColorPalette(p, color_palette, marker, "color")
+        
+        return(p)
+      })
+    }
+    
+  } else if (method == "scatter") {
+    # Simple scatter plot with marker expression coloring
+    p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], 
+                               color = .data[[marker]])) +
+      geom_point(alpha = 0.7, size = 0.8) +
+      labs(title = title, x = dim1, y = dim2) +
+      theme_minimal(base_size = font_size) +
+      coord_fixed()
+    
+    # Apply color palette
+    p <- applyColorPalette(p, color_palette, marker, "color")
+  }
+  
+  # Apply enhanced theme
+  p <- p + theme_minimal(base_size = font_size) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5, size = font_size * 1.2),
+      axis.title = element_text(face = "bold", size = font_size * 1.1),
+      axis.text = element_text(size = font_size),
+      legend.title = element_text(face = "bold", size = font_size * 1.1),
+      legend.text = element_text(size = font_size),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "grey80", fill = NA)
+    )
+  
+  return(p)
+}
+
+# Function to auto-detect available dimensionality reduction methods
+getAvailableDimMethods <- function(plot_data) {
+  methods <- list()
+  
+  if ("tsne1" %in% colnames(plot_data) && "tsne2" %in% colnames(plot_data)) {
+    methods[["t-SNE"]] <- c("tsne1", "tsne2")
+  }
+  if ("umap1" %in% colnames(plot_data) && "umap2" %in% colnames(plot_data)) {
+    methods[["UMAP"]] <- c("umap1", "umap2")
+  }
+  if ("pca1" %in% colnames(plot_data) && "pca2" %in% colnames(plot_data)) {
+    methods[["PCA"]] <- c("pca1", "pca2")
+  }
+  if ("mds1" %in% colnames(plot_data) && "mds2" %in% colnames(plot_data)) {
+    methods[["MDS"]] <- c("mds1", "mds2")
+  }
+  
+  return(methods)
+}
+
+# Function to optimize heatmap rendering for large datasets
+optimizeHeatmapRendering <- function(plot_data, max_points = 10000) {
+  if (nrow(plot_data) > max_points) {
+    # Stratified sampling to preserve structure
+    sample_indices <- sample(nrow(plot_data), max_points)
+    return(plot_data[sample_indices, ])
+  }
+  return(plot_data)
+}
+
+# Function to create a grid of heatmaps for multiple markers
+createMultiMarkerHeatmapGrid <- function(plot_data, markers, dim1, dim2, 
+                                        method = "hex", bins = 30,
+                                        color_palette = "plasma", font_size = 10,
+                                        ncol = 3) {
+  
+  # Optimize data for rendering
+  opt_data <- optimizeHeatmapRendering(plot_data)
+  
+  # Create individual plots
+  plot_list <- list()
+  
+  for (i in seq_along(markers)) {
+    marker <- markers[i]
+    
+    p <- createMarkerExpressionHeatmap(
+      plot_data = opt_data,
+      marker = marker,
+      dim1 = dim1, 
+      dim2 = dim2,
+      method = method,
+      bins = bins,
+      title = marker,
+      font_size = font_size,
+      color_palette = color_palette
+    )
+    
+    plot_list[[i]] <- p
+  }
+  
+  # Arrange plots in grid
+  if (requireNamespace("gridExtra", quietly = TRUE)) {
+    grid_plot <- gridExtra::grid.arrange(grobs = plot_list, ncol = ncol)
+    return(grid_plot)
+  } else {
+    # Fallback: return list of plots
+    return(plot_list)
+  }
+}
+
+# Function to format dimensional method names for display
+formatDimMethodName <- function(method_key) {
+  switch(method_key,
+         "t-SNE" = "t-SNE",
+         "UMAP" = "UMAP", 
+         "PCA" = "Principal Component Analysis",
+         "MDS" = "Multidimensional Scaling",
+         method_key)
+}
+
+# Function to get suitable axis labels for dimensionality reduction
+getDimAxisLabels <- function(method_key) {
+  switch(method_key,
+         "t-SNE" = c("t-SNE 1", "t-SNE 2"),
+         "UMAP" = c("UMAP 1", "UMAP 2"),
+         "PCA" = c("PC 1", "PC 2"),
+         "MDS" = c("MDS 1", "MDS 2"),
+         c("Dimension 1", "Dimension 2"))
 }

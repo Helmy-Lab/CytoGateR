@@ -23,13 +23,8 @@ visualizationModuleUI <- function(id) {
              
              # Legend options
              checkboxInput(ns("showLegend"), "Show Legend", value = TRUE),
-             conditionalPanel(
-               condition = paste0("input['", ns("showLegend"), "'] === true"),
-               selectInput(ns("legendPosition"), "Legend Position", 
-                           choices = c("Right" = "right", "Left" = "left", 
-                                       "Top" = "top", "Bottom" = "bottom"),
-                           selected = "right")
-             )
+             # Replace conditionalPanel with server-side rendering
+             uiOutput(ns("legendOptionsUI"))
       ),
       column(8,
              # Plot preview
@@ -52,6 +47,24 @@ visualizationModuleUI <- function(id) {
 visualizationModuleServer <- function(id, plot_data, clustering_results = reactive(NULL), 
                                       app_state, markers = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
+    
+    # ============================================================================
+    # SERVER-SIDE CONDITIONAL UI RENDERING
+    # ============================================================================
+    
+    # Legend options UI
+    output$legendOptionsUI <- renderUI({
+      if (isTRUE(input$showLegend)) {
+        selectInput(session$ns("legendPosition"), "Legend Position", 
+                    choices = c("Right" = "right", "Left" = "left", 
+                                "Top" = "top", "Bottom" = "bottom"),
+                    selected = "right")
+      }
+    })
+    
+    # ============================================================================
+    # END OF SERVER-SIDE CONDITIONAL UI RENDERING
+    # ============================================================================
     
     # Update color by dropdown when data or clustering changes
     observe({
@@ -143,7 +156,7 @@ visualizationModuleServer <- function(id, plot_data, clustering_results = reacti
       point_size <- input$pointSize
       point_alpha <- input$pointAlpha
       show_legend <- input$showLegend
-      legend_position <- input$legendPosition
+      legend_position <- if (!is.null(input$legendPosition)) input$legendPosition else "right"
       
       # Create plot based on coloring variable
       if (input$colorBy != "None" && input$colorBy %in% colnames(data)) {

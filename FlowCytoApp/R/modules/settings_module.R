@@ -12,16 +12,16 @@ settingsModuleUI <- function(id) {
              h4("Global Plot Settings", style = "text-align: center; font-weight: bold;"),
              
              sliderInput(ns("global_plot_width"), "Plot Width", 
-                         min = 300, max = 1200, value = 800, step = 50),
+                         min = 300, max = 1200, value = 600, step = 50),
              
              sliderInput(ns("global_plot_height"), "Plot Height", 
-                         min = 300, max = 1200, value = 800, step = 50),
+                         min = 300, max = 1200, value = 600, step = 50),
              
              sliderInput(ns("global_font_size"), "Base Font Size", 
                          min = 8, max = 36, value = 18, step = 1),
              
              sliderInput(ns("global_point_size"), "Point Size", 
-                         min = 2, max = 12, value = 10, step = 1),
+                         min = 1, max = 15, value = 2, step = 1),
              
              radioButtons(ns("global_color_palette"), "Color Palette",
                           choices = c("Viridis (Colorblind-friendly)" = "viridis", 

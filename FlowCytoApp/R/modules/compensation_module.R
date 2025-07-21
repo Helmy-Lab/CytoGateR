@@ -351,7 +351,23 @@ compensationModuleUI <- function(id) {
                             solidHeader = TRUE,
                             width = 12,
                             
-                            h5(icon("file"), "Compensated FCS Files:"),
+                            h5(icon("file"), "Compensated Experimental Files:"),
+                            
+                            div(class = "alert alert-info", style = "margin-bottom: 15px;",
+                                icon("info-circle"), 
+                                strong(" Export contents: "), 
+                                "Only selected experimental files will be compensated and exported. ",
+                                "Check the option below to also include compensated control files."),
+                            
+                            # Channel compatibility preview
+                            conditionalPanel(
+                              condition = paste0("output['", ns("matrix_validation"), "'] != null"),
+                              h6(icon("search"), "Channel Compatibility Preview:"),
+                              shinycssloaders::withSpinner(
+                                verbatimTextOutput(ns("channel_compatibility_preview"))
+                              ),
+                              br()
+                            ),
                             
                             # Status indicator for compensated files
                             conditionalPanel(
@@ -364,17 +380,17 @@ compensationModuleUI <- function(id) {
                             ),
                             
                             checkboxInput(ns("add_suffix"), 
-                                          "Add '_compensated' suffix", 
+                                          "Add '_compensated' suffix to filenames", 
                                           value = TRUE),
                             
                             checkboxInput(ns("export_controls"), 
-                                          "Include control files", 
+                                          "Also export compensated control files", 
                                           value = FALSE),
                             
                             conditionalPanel(
                               condition = paste0("output['", ns("compensation_file_status"), "'].indexOf('ready') > -1"),
                               downloadButton(ns("download_compensated_fcs"), 
-                                             "Download Compensated FCS Files",
+                                             "Download Compensated Experimental Files",
                                              class = "btn-success btn-lg",
                                              icon = icon("download"),
                                              style = "width: 100%; margin-bottom: 15px;")
@@ -387,7 +403,7 @@ compensationModuleUI <- function(id) {
                                   " Compensated files will be generated automatically after matrix computation."),
                               br(),
                               actionButton(ns("generate_compensated"), 
-                                          "Generate Compensated Files Now",
+                                          "Generate Compensated Experimental Files Now",
                                           class = "btn-info",
                                           icon = icon("cogs"),
                                           style = "width: 100%;")
@@ -781,6 +797,7 @@ compensationModuleServer <- function(id, app_state) {
       file_assignments = list(),      # Individual channel assignments (for spillover computation)
       group_assignments = list(),     # Fluorophore group assignments (for display)
       channel_groups = list(),        # Channel grouping information
+      experimental_files = character(), # List of experimental files to be compensated
       validated_assignment = FALSE,
       
       # Matrix management
@@ -865,17 +882,27 @@ compensationModuleServer <- function(id, app_state) {
             )
           ),
           
-          # Single-stain control assignment
-          h5(icon("flask"), "Single-Stain Controls:"),
-          
-          # Dynamic UI for single-stain assignment
-          uiOutput(ns("single_stain_assignment_ui")),
-          
-          br(),
-          actionButton(ns("validate_assignment"), 
-                       "Validate File Assignment",
-                       class = "btn-success",
-                       icon = icon("check-circle"))
+                                      # Single-stain control assignment
+                            h5(icon("flask"), "Single-Stain Controls:"),
+                            
+                            # Dynamic UI for single-stain assignment
+                            uiOutput(ns("single_stain_assignment_ui")),
+                            
+                            hr(),
+                            
+                            # Experimental files assignment
+                            h5(icon("microscope"), "Experimental Files:"),
+                            div(class = "alert alert-info", style = "margin-bottom: 10px;",
+                                icon("info-circle"), 
+                                " Select which files contain your experimental data to be compensated."),
+                            
+                            uiOutput(ns("experimental_files_ui")),
+                            
+                            br(),
+                            actionButton(ns("validate_assignment"), 
+                                         "Validate File Assignment",
+                                         class = "btn-success",
+                                         icon = icon("check-circle"))
         )
       }
     })
@@ -1010,6 +1037,20 @@ compensationModuleServer <- function(id, app_state) {
         })
       }
       
+      # Mark experimental files
+      if (!is.null(values$experimental_files) && length(values$experimental_files) > 0) {
+        experimental_indices <- which(file_summary$Filename %in% values$experimental_files)
+        for (exp_idx in experimental_indices) {
+          current_role <- file_summary$`Assigned Role`[exp_idx]
+          if (current_role == "Not assigned") {
+            file_summary$`Assigned Role`[exp_idx] <- "Experimental Data"
+          } else {
+            # File is assigned as both control and experimental (warning case)
+            file_summary$`Assigned Role`[exp_idx] <- paste(current_role, "+ Experimental")
+          }
+        }
+      }
+      
       DT::datatable(
         file_summary,
         options = list(
@@ -1023,15 +1064,8 @@ compensationModuleServer <- function(id, app_state) {
         DT::formatStyle(
           "Assigned Role",
           backgroundColor = DT::styleEqual(
-            "Not assigned", 
-            "#f8d7da"  # Light red for unassigned files
-          )
-        ) %>%
-        DT::formatStyle(
-          "Assigned Role",
-          backgroundColor = DT::styleEqual(
-            "Unstained Control", 
-            "#d1ecf1"  # Light blue for unstained
+            c("Not assigned", "Unstained Control", "Experimental Data"), 
+            c("#f8d7da", "#d1ecf1", "#d4edda")  # Light red, light blue, light green
           )
         )
     })
@@ -1175,6 +1209,99 @@ compensationModuleServer <- function(id, app_state) {
       })
     })
     
+    # Experimental files assignment UI
+    output$experimental_files_ui <- renderUI({
+      if (is.null(input$fcs_files)) {
+        return(div(class = "alert alert-secondary",
+                   icon("upload"), " Upload files first to select experimental data."))
+      }
+      
+      # Create choices excluding control files that are already assigned
+      all_files <- input$fcs_files$name
+      
+      # Get assigned control files
+      assigned_controls <- character()
+      if (!is.null(input$unstained_file) && input$unstained_file != "") {
+        assigned_controls <- c(assigned_controls, input$unstained_file)
+      }
+      
+      # Get single-stain control assignments
+      tryCatch({
+        test_file <- read.FCS(input$fcs_files$datapath[1], transformation = FALSE)
+        params <- parameters(test_file)
+        parameter_names <- colnames(exprs(test_file))
+        parameter_descriptions <- params$desc[match(parameter_names, params$name)]
+        fluor_channels <- detectFluorescenceChannels(parameter_names, parameter_descriptions)
+        
+        for (channel in fluor_channels) {
+          control_file <- input[[paste0("control_", channel)]]
+          if (!is.null(control_file) && control_file != "") {
+            assigned_controls <- c(assigned_controls, control_file)
+          }
+        }
+      }, error = function(e) {
+        # Silent error handling
+      })
+      
+      # Remove duplicates and get experimental file choices
+      assigned_controls <- unique(assigned_controls)
+      experimental_choices <- setdiff(all_files, assigned_controls)
+      
+      # Create the UI
+      if (length(experimental_choices) == 0) {
+        return(div(class = "alert alert-warning",
+                   icon("exclamation-triangle"), 
+                   " All uploaded files are assigned as controls. Upload additional experimental files or adjust control assignments."))
+      }
+      
+      # Create file choices with size information
+      exp_file_choices <- setNames(
+        experimental_choices,
+        paste0(experimental_choices, " (", 
+               format(input$fcs_files$size[match(experimental_choices, input$fcs_files$name)], 
+                      units = "MB", digits = 2), ")")
+      )
+      
+      tagList(
+        shinyWidgets::pickerInput(
+          ns("experimental_files_selection"),
+          "Select Experimental Files:",
+          choices = exp_file_choices,
+          multiple = TRUE,
+          selected = if (length(values$experimental_files) > 0) {
+            intersect(values$experimental_files, experimental_choices)
+          } else {
+            experimental_choices  # Default: select all non-control files
+          },
+          options = list(
+            `actions-box` = TRUE,
+            `live-search` = TRUE,
+            `select-all-text` = "Select All Experimental",
+            `deselect-all-text` = "Deselect All",
+            title = "Choose experimental files to compensate..."
+          )
+        ),
+        
+        div(class = "alert alert-success", style = "margin-top: 10px;",
+            icon("check-circle"), 
+            strong("Available experimental files: "), length(experimental_choices),
+            if (length(assigned_controls) > 0) {
+              paste0(" (", length(assigned_controls), " control files excluded)")
+            } else {
+              ""
+            }
+        )
+      )
+    })
+    
+    # Update experimental files when selection changes
+    observeEvent(input$experimental_files_selection, {
+      if (!is.null(input$experimental_files_selection)) {
+        values$experimental_files <- input$experimental_files_selection
+        message("Experimental files updated: ", paste(values$experimental_files, collapse = ", "))
+      }
+    })
+    
     # Validate file assignment - ENHANCED VERSION
     observeEvent(input$validate_assignment, {
       req(input$unstained_file)
@@ -1231,6 +1358,13 @@ compensationModuleServer <- function(id, app_state) {
         return()
       }
       
+      # Validation - need at least 1 experimental file
+      if (is.null(values$experimental_files) || length(values$experimental_files) == 0) {
+        showNotification("Please select at least 1 experimental file to be compensated", 
+                         type = "error")
+        return()
+      }
+      
       # Store assignments for spillover computation
       values$file_assignments <- assignments
       values$group_assignments <- channel_assignments
@@ -1242,9 +1376,11 @@ compensationModuleServer <- function(id, app_state) {
       assigned_channels <- names(channel_assignments)
       total_channels <- length(channel_assignments)
       total_available <- length(fluor_channels)
+      experimental_count <- length(values$experimental_files)
       
       success_msg <- paste0("✓ Successfully assigned ", total_channels, " of ", total_available, " detected fluorescent channels\n",
-                           "✓ Channels: ", paste(assigned_channels, collapse = ", "), "\n",
+                           "✓ Control channels: ", paste(assigned_channels, collapse = ", "), "\n",
+                           "✓ Experimental files: ", experimental_count, " selected\n",
                            "✓ Enhanced detection method used\n",
                            "✓ Ready to compute spillover matrix!")
       
@@ -1433,6 +1569,9 @@ compensationModuleServer <- function(id, app_state) {
           values$matrix_source <- "computed"
           values$workflow_step <- 4
           
+          # FIXED: Trigger initial matrix display
+          matrix_render_trigger(matrix_render_trigger() + 1)
+          
           success_msg <- paste0("✓ Spillover matrix computed successfully!\n",
                                "✓ Channels included: ", paste(safe_channels, collapse = ", "), "\n",
                                "✓ Matrix dimensions: ", nrow(spillover_matrix), "×", ncol(spillover_matrix))
@@ -1489,6 +1628,9 @@ compensationModuleServer <- function(id, app_state) {
         values$current_matrix <- spillover_matrix
         values$matrix_source <- "uploaded"
         values$workflow_step <- 4
+        
+        # FIXED: Trigger initial matrix display
+        matrix_render_trigger(matrix_render_trigger() + 1)
         
         # Clear any existing compensated files since we have a new matrix
         values$compensated_flowset <- NULL
@@ -1568,15 +1710,24 @@ compensationModuleServer <- function(id, app_state) {
       })
     })
     
-    # Matrix editor
+    # Add a reactive value to control when to update the datatable
+    matrix_render_trigger <- reactiveVal(0)
+    
+    # Matrix editor - FIXED: Prevent re-rendering during edits
     output$matrix_editor <- DT::renderDataTable({
       req(values$current_matrix)
       
-      matrix_df <- as.data.frame(round(values$current_matrix, 4))
+      # ISOLATE the matrix data to prevent re-rendering during edits
+      # Only re-render when explicitly triggered
+      matrix_render_trigger()
+      
+      matrix_df <- isolate({
+        as.data.frame(round(values$current_matrix, 4))
+      })
       matrix_df <- cbind(Channel = rownames(matrix_df), matrix_df)
       
       # Create proper editable configuration
-      editable_config <- if(input$enable_editing) {
+      editable_config <- if(isolate(input$enable_editing)) {
         list(
           target = "cell",
           disable = list(columns = c(0))  # Disable first column (Channel names)
@@ -1600,7 +1751,7 @@ compensationModuleServer <- function(id, app_state) {
           ordering = FALSE  # Disable sorting to prevent confusion during editing
         ),
         rownames = FALSE,
-        caption = if(input$enable_editing) {
+        caption = if(isolate(input$enable_editing)) {
           HTML("<strong>Matrix Editor:</strong> Double-click cells to edit values. Diagonal should be ~1.0, off-diagonal <0.5")
         } else {
           "Spillover Matrix (Enable editing checkbox above to modify values)"
@@ -1622,14 +1773,21 @@ compensationModuleServer <- function(id, app_state) {
         )
     })
     
-    # Debug: Monitor editing state
-    observe({
-      if (!is.null(input$enable_editing)) {
-        message("Matrix editing enabled: ", input$enable_editing)
-      }
-    })
+    # Monitor editing state changes and trigger datatable updates when needed
+    observeEvent(input$enable_editing, {
+      message("Matrix editing mode changed to: ", input$enable_editing)
+      # Force datatable re-render when editing mode changes
+      matrix_render_trigger(matrix_render_trigger() + 1)
+    }, ignoreNULL = TRUE, ignoreInit = TRUE)
     
-    # Handle matrix edits with improved validation and indexing
+    # Trigger datatable re-render when matrix is computed or uploaded
+    observeEvent(values$matrix_source, {
+      message("Matrix source changed to: ", values$matrix_source)
+      # Force datatable re-render with new matrix
+      matrix_render_trigger(matrix_render_trigger() + 1)
+    }, ignoreNULL = TRUE, ignoreInit = FALSE)
+    
+    # Handle matrix edits - FIXED: Update matrix without causing datatable re-render
     observeEvent(input$matrix_editor_cell_edit, {
       message("Matrix edit event triggered!")
       req(input$enable_editing, values$current_matrix)
@@ -1685,9 +1843,11 @@ compensationModuleServer <- function(id, app_state) {
                          type = "warning", duration = 5)
         }
         
-        # Apply the edit
-        new_matrix[row_idx, matrix_col_idx] <- new_value
-        values$current_matrix <- new_matrix
+        # FIXED: Apply edit using isolate to prevent reactive cascade
+        isolate({
+          new_matrix[row_idx, matrix_col_idx] <- new_value
+          values$current_matrix <- new_matrix
+        })
         
         # Clear compensated files since matrix changed
         values$compensated_flowset <- NULL
@@ -1714,6 +1874,9 @@ compensationModuleServer <- function(id, app_state) {
       if (!identical(values$current_matrix, values$original_matrix)) {
         values$current_matrix <- values$original_matrix
         
+        # FIXED: Force datatable re-render to show reset values
+        matrix_render_trigger(matrix_render_trigger() + 1)
+        
         # Clear compensated files since matrix changed
         values$compensated_flowset <- NULL
         
@@ -1739,6 +1902,9 @@ compensationModuleServer <- function(id, app_state) {
         
         # Save the current matrix as the new original
         values$original_matrix <- values$current_matrix
+        
+        # FIXED: Ensure visual consistency after save
+        matrix_render_trigger(matrix_render_trigger() + 1)
         
         # Clear compensated files since matrix changed
         values$compensated_flowset <- NULL
@@ -1931,10 +2097,10 @@ compensationModuleServer <- function(id, app_state) {
       values$qc_results$pairwise_plot
     })
     
-    # Apply compensation to all files - triggered when matrix is available
+    # Apply compensation to experimental files only - triggered when matrix is available
     observeEvent(values$current_matrix, {
       # This observer runs after matrix computation/upload to generate compensated files
-      req(values$current_matrix, values$uploaded_files)
+      req(values$current_matrix, values$uploaded_files, values$experimental_files)
       
       # Only run if we don't already have compensated files
       if (!is.null(values$compensated_flowset)) {
@@ -1942,39 +2108,119 @@ compensationModuleServer <- function(id, app_state) {
       }
       
       tryCatch({
-        # Apply compensation to all uploaded files
-        withProgress(message = "Generating compensated FCS files...", value = 0, {
+        # Apply compensation only to experimental files
+        withProgress(message = "Generating compensated experimental files...", value = 0, {
           compensated_files <- list()
           comp_obj <- compensation(values$current_matrix)
           
-          for (i in 1:nrow(values$uploaded_files)) {
-            incProgress(1/nrow(values$uploaded_files), 
-                        detail = paste("Processing", values$uploaded_files$name[i]))
+          # Filter to only experimental files
+          experimental_file_indices <- which(values$uploaded_files$name %in% values$experimental_files)
+          
+          if (length(experimental_file_indices) == 0) {
+            showNotification("No experimental files selected for compensation", type = "warning")
+            return()
+          }
+          
+          # Track compatibility issues for detailed reporting
+          compatibility_issues <- list()
+          
+          for (i in experimental_file_indices) {
+            incProgress(1/length(experimental_file_indices), 
+                        detail = paste("Processing experimental file:", values$uploaded_files$name[i]))
             
             # Read the FCS file
             ff <- read.FCS(values$uploaded_files$datapath[i], transformation = FALSE)
             
-            # Check if file has the required channels for compensation
+            # Enhanced channel compatibility checking with normalization
             file_channels <- colnames(ff)
             matrix_channels <- colnames(values$current_matrix)
             
-            if (all(matrix_channels %in% file_channels)) {
-              # Apply compensation
-              ff_comp <- compensate(ff, comp_obj)
-              compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+            # Use enhanced channel matching
+            channel_matches <- findChannelMatches(matrix_channels, file_channels)
+            
+            # Count successful matches
+            successful_matches <- sum(sapply(channel_matches, function(m) m$found))
+            high_confidence_matches <- sum(sapply(channel_matches, function(m) m$found && m$confidence >= 0.9))
+            
+            # Decide whether to proceed with compensation
+            compensation_threshold <- 0.8  # Require 80% of channels to match
+            
+            if (successful_matches >= length(matrix_channels) * compensation_threshold) {
+              tryCatch({
+                # Create channel mapping for compensation
+                channel_mapping <- character()
+                for (matrix_ch in names(channel_matches)) {
+                  match_info <- channel_matches[[matrix_ch]]
+                  if (match_info$found) {
+                    channel_mapping[matrix_ch] <- match_info$file_channel
+                  }
+                }
+                
+                # Apply compensation with channel mapping if needed
+                if (all(matrix_channels %in% file_channels)) {
+                  # Direct compensation - no mapping needed
+                  ff_comp <- compensate(ff, comp_obj)
+                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+                  message("✓ Successfully compensated (exact): ", values$uploaded_files$name[i])
+                } else if (length(channel_mapping) >= length(matrix_channels) * compensation_threshold) {
+                  # Compensation with channel mapping
+                  # Create a new compensation object with mapped channel names
+                  mapped_matrix <- values$current_matrix
+                  
+                  # Rename columns in spillover matrix to match file channels
+                  for (matrix_ch in names(channel_mapping)) {
+                    file_ch <- channel_mapping[matrix_ch]
+                    if (matrix_ch %in% colnames(mapped_matrix)) {
+                      colnames(mapped_matrix)[colnames(mapped_matrix) == matrix_ch] <- file_ch
+                    }
+                    if (matrix_ch %in% rownames(mapped_matrix)) {
+                      rownames(mapped_matrix)[rownames(mapped_matrix) == matrix_ch] <- file_ch
+                    }
+                  }
+                  
+                  # Apply compensation with mapped matrix
+                  mapped_comp_obj <- compensation(mapped_matrix)
+                  ff_comp <- compensate(ff, mapped_comp_obj)
+                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+                  
+                  match_quality <- paste0(high_confidence_matches, "/", length(matrix_channels), " high confidence")
+                  message("✓ Successfully compensated (mapped): ", values$uploaded_files$name[i], 
+                         " - ", match_quality)
+                } else {
+                  stop("Insufficient channel matches for compensation")
+                }
+              }, error = function(e) {
+                # Store detailed error info
+                compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
+                  channel_matches, file_channels, matrix_channels, e$message
+                )
+                message("✗ Compensation failed for: ", values$uploaded_files$name[i], " - ", e$message)
+              })
             } else {
-              # Skip files that don't have required channels
-              message("Skipping ", values$uploaded_files$name[i], " - missing required channels")
+              # Store compatibility issue details with enhanced matching info
+              compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
+                channel_matches, file_channels, matrix_channels, "Insufficient channel matches"
+              )
+              
+              message("✗ Channel compatibility failed: ", values$uploaded_files$name[i], 
+                     " - ", successful_matches, "/", length(matrix_channels), " channels matched")
             }
+          }
+          
+          # Show detailed compatibility report if there were issues
+          if (length(compatibility_issues) > 0) {
+            showChannelCompatibilityReport(compatibility_issues, values$uploaded_files$name)
           }
           
           # Store compensated flowset
           if (length(compensated_files) > 0) {
             values$compensated_flowset <- flowSet(compensated_files)
-            message("Generated ", length(compensated_files), " compensated FCS files")
+            message("Generated ", length(compensated_files), " compensated experimental files")
+            showNotification(paste("Successfully compensated", length(compensated_files), 
+                                  "experimental files"), type = "message")
           } else {
             values$compensated_flowset <- NULL
-            showNotification("No files could be compensated - check channel compatibility", 
+            showNotification("No experimental files could be compensated - check channel compatibility", 
                            type = "warning")
           }
         })
@@ -1984,54 +2230,187 @@ compensationModuleServer <- function(id, app_state) {
       })
     })
     
-    # Manual compensation generation
+    # Manual compensation generation for experimental files
     observeEvent(input$generate_compensated, {
-      req(values$current_matrix, values$uploaded_files)
+      req(values$current_matrix, values$uploaded_files, values$experimental_files)
       
       # Clear existing compensated files to force regeneration
       values$compensated_flowset <- NULL
       
       tryCatch({
-        # Apply compensation to all uploaded files
-        withProgress(message = "Manually generating compensated FCS files...", value = 0, {
+        # Apply compensation only to experimental files
+        withProgress(message = "Manually generating compensated experimental files...", value = 0, {
           compensated_files <- list()
           comp_obj <- compensation(values$current_matrix)
           
-          for (i in 1:nrow(values$uploaded_files)) {
-            incProgress(1/nrow(values$uploaded_files), 
-                        detail = paste("Processing", values$uploaded_files$name[i]))
+          # Filter to only experimental files
+          experimental_file_indices <- which(values$uploaded_files$name %in% values$experimental_files)
+          
+          if (length(experimental_file_indices) == 0) {
+            showNotification("No experimental files selected for compensation", type = "warning")
+            return()
+          }
+          
+          # Track compatibility issues for detailed reporting
+          compatibility_issues <- list()
+          
+          for (i in experimental_file_indices) {
+            incProgress(1/length(experimental_file_indices), 
+                        detail = paste("Processing experimental file:", values$uploaded_files$name[i]))
             
             # Read the FCS file
             ff <- read.FCS(values$uploaded_files$datapath[i], transformation = FALSE)
             
-            # Check if file has the required channels for compensation
+            # Enhanced channel compatibility checking with normalization
             file_channels <- colnames(ff)
             matrix_channels <- colnames(values$current_matrix)
             
-            if (all(matrix_channels %in% file_channels)) {
-              # Apply compensation
-              ff_comp <- compensate(ff, comp_obj)
-              compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+            # Use enhanced channel matching
+            channel_matches <- findChannelMatches(matrix_channels, file_channels)
+            
+            # Count successful matches
+            successful_matches <- sum(sapply(channel_matches, function(m) m$found))
+            high_confidence_matches <- sum(sapply(channel_matches, function(m) m$found && m$confidence >= 0.9))
+            
+            # Decide whether to proceed with compensation
+            compensation_threshold <- 0.8  # Require 80% of channels to match
+            
+            if (successful_matches >= length(matrix_channels) * compensation_threshold) {
+              tryCatch({
+                # Create channel mapping for compensation
+                channel_mapping <- character()
+                for (matrix_ch in names(channel_matches)) {
+                  match_info <- channel_matches[[matrix_ch]]
+                  if (match_info$found) {
+                    channel_mapping[matrix_ch] <- match_info$file_channel
+                  }
+                }
+                
+                # Apply compensation with channel mapping if needed
+                if (all(matrix_channels %in% file_channels)) {
+                  # Direct compensation - no mapping needed
+                  ff_comp <- compensate(ff, comp_obj)
+                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+                  message("✓ Successfully compensated (exact): ", values$uploaded_files$name[i])
+                } else if (length(channel_mapping) >= length(matrix_channels) * compensation_threshold) {
+                  # Compensation with channel mapping
+                  # Create a new compensation object with mapped channel names
+                  mapped_matrix <- values$current_matrix
+                  
+                  # Rename columns in spillover matrix to match file channels
+                  for (matrix_ch in names(channel_mapping)) {
+                    file_ch <- channel_mapping[matrix_ch]
+                    if (matrix_ch %in% colnames(mapped_matrix)) {
+                      colnames(mapped_matrix)[colnames(mapped_matrix) == matrix_ch] <- file_ch
+                    }
+                    if (matrix_ch %in% rownames(mapped_matrix)) {
+                      rownames(mapped_matrix)[rownames(mapped_matrix) == matrix_ch] <- file_ch
+                    }
+                  }
+                  
+                  # Apply compensation with mapped matrix
+                  mapped_comp_obj <- compensation(mapped_matrix)
+                  ff_comp <- compensate(ff, mapped_comp_obj)
+                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
+                  
+                  match_quality <- paste0(high_confidence_matches, "/", length(matrix_channels), " high confidence")
+                  message("✓ Successfully compensated (mapped): ", values$uploaded_files$name[i], 
+                         " - ", match_quality)
+                } else {
+                  stop("Insufficient channel matches for compensation")
+                }
+              }, error = function(e) {
+                # Store detailed error info
+                compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
+                  channel_matches, file_channels, matrix_channels, e$message
+                )
+                message("✗ Compensation failed for: ", values$uploaded_files$name[i], " - ", e$message)
+              })
             } else {
-              # Skip files that don't have required channels
-              message("Skipping ", values$uploaded_files$name[i], " - missing required channels")
+              # Store compatibility issue details with enhanced matching info
+              compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
+                channel_matches, file_channels, matrix_channels, "Insufficient channel matches"
+              )
+              
+              message("✗ Channel compatibility failed: ", values$uploaded_files$name[i], 
+                     " - ", successful_matches, "/", length(matrix_channels), " channels matched")
             }
+          }
+          
+          # Show detailed compatibility report if there were issues
+          if (length(compatibility_issues) > 0) {
+            showChannelCompatibilityReport(compatibility_issues, values$uploaded_files$name)
           }
           
           # Store compensated flowset
           if (length(compensated_files) > 0) {
             values$compensated_flowset <- flowSet(compensated_files)
             showNotification(paste("Successfully generated", length(compensated_files), 
-                                  "compensated FCS files"), type = "message")
+                                  "compensated experimental files"), type = "message")
           } else {
             values$compensated_flowset <- NULL
-            showNotification("No files could be compensated - check channel compatibility", 
+            showNotification("No experimental files could be compensated - check channel compatibility", 
                            type = "warning")
           }
         })
       }, error = function(e) {
         showNotification(paste("Error generating compensated files:", e$message), 
                         type = "error")
+      })
+    })
+    
+    # Channel compatibility preview
+    output$channel_compatibility_preview <- renderText({
+      req(values$current_matrix, values$experimental_files)
+      
+      if (length(values$experimental_files) == 0) {
+        return("No experimental files selected")
+      }
+      
+      tryCatch({
+        matrix_channels <- colnames(values$current_matrix)
+        preview_lines <- character()
+        
+        # Check a sample of experimental files
+        sample_files <- head(values$experimental_files, 3)
+        
+        for (exp_file in sample_files) {
+          file_idx <- which(values$uploaded_files$name == exp_file)
+          if (length(file_idx) > 0) {
+            ff <- read.FCS(values$uploaded_files$datapath[file_idx], transformation = FALSE)
+            file_channels <- colnames(ff)
+            
+            # Use enhanced channel matching
+            channel_matches <- findChannelMatches(matrix_channels, file_channels)
+            successful_matches <- sum(sapply(channel_matches, function(m) m$found))
+            exact_matches <- sum(sapply(channel_matches, function(m) m$found && m$match_type == "exact_normalized"))
+            
+            match_percentage <- round((successful_matches / length(matrix_channels)) * 100)
+            
+            if (successful_matches == length(matrix_channels)) {
+              if (exact_matches == length(matrix_channels)) {
+                preview_lines <- c(preview_lines, paste0("✅ ", exp_file, " - Perfect match (100%)"))
+              } else {
+                preview_lines <- c(preview_lines, paste0("✅ ", exp_file, " - All channels mapped (", match_percentage, "%)"))
+              }
+            } else if (successful_matches >= length(matrix_channels) * 0.8) {
+              preview_lines <- c(preview_lines, paste0("⚠️ ", exp_file, " - Partial match (", match_percentage, "%) - May work"))
+            } else {
+              preview_lines <- c(preview_lines, paste0("❌ ", exp_file, " - Poor match (", match_percentage, "%) - Will fail"))
+            }
+          }
+        }
+        
+        if (length(values$experimental_files) > 3) {
+          preview_lines <- c(preview_lines, paste0("... and ", length(values$experimental_files) - 3, " more files"))
+        }
+        
+        preview_lines <- c(preview_lines, "", paste0("Matrix channels: ", paste(matrix_channels, collapse = ", ")))
+        
+        return(paste(preview_lines, collapse = "\n"))
+        
+      }, error = function(e) {
+        return(paste("Error checking compatibility:", e$message))
       })
     })
     
@@ -2041,10 +2420,16 @@ compensationModuleServer <- function(id, app_state) {
       matrix_available <- !is.null(values$current_matrix)
       files_available <- !is.null(values$compensated_flowset)
       matrix_source <- values$matrix_source
+      experimental_files_count <- length(values$experimental_files)
       
       # Check if matrix is available
       if (!matrix_available) {
         return("No spillover matrix available")
+      }
+      
+      # Check if experimental files are selected
+      if (experimental_files_count == 0) {
+        return("⚠ No experimental files selected for compensation\nPlease select experimental files in the Upload & Import tab.")
       }
       
       # Check if compensated files are ready
@@ -2052,23 +2437,25 @@ compensationModuleServer <- function(id, app_state) {
         n_files <- length(values$compensated_flowset)
         file_names <- sampleNames(values$compensated_flowset)
         
-        status_text <- paste0("✓ Compensated files ready for download\n",
-                             "✓ Files processed: ", n_files, "\n",
+        status_text <- paste0("✓ Compensated experimental files ready for download\n",
+                             "✓ Experimental files processed: ", n_files, " of ", experimental_files_count, "\n",
                              "✓ Sample files: ", paste(head(file_names, 3), collapse = ", "),
                              if (n_files > 3) "..." else "", "\n",
                              "✓ Matrix source: ", ifelse(matrix_source == "computed", "Computed", "Uploaded"), "\n",
                              "✓ Matrix applied: ", nrow(values$current_matrix), " channels\n",
-                             "✓ Ready to export as ZIP file")
+                             "✓ Ready to export compensated experimental data")
         return(status_text)
       }
       
       # Check if matrix computation is in progress or matrix exists but no compensated files
       if (!is.null(values$current_matrix) && is.null(values$compensated_flowset)) {
-        return("⏳ Generating compensated files from spillover matrix...\nThis process runs automatically after matrix computation.")
+        return(paste0("⏳ Generating compensated experimental files from spillover matrix...\n",
+                     "Selected experimental files: ", experimental_files_count, "\n",
+                     "This process runs automatically after matrix computation."))
       }
       
       # Default status
-      return("⚠ Compute spillover matrix first to generate compensated files")
+      return("⚠ Compute spillover matrix and select experimental files to generate compensated data")
     })
     
     # Export functionality ----
@@ -2416,4 +2803,285 @@ createPairwisePlot <- function(file_assignments, file_paths, file_names, spillov
   } else {
     ggplot() + labs(title = "No pairwise combinations available")
   }
-} 
+}
+
+# Enhanced channel normalization for flow cytometry naming conventions
+normalizeChannelName <- function(channel_name) {
+  if (is.na(channel_name) || channel_name == "") return("")
+  
+  # Convert to character and clean
+  ch <- as.character(channel_name)
+  
+  # Remove common prefixes (case-insensitive)
+  common_prefixes <- c(
+    "FJComp-", "fjcomp-", "FJCOMP-",           # FlowJo compensation
+    "Comp-", "comp-", "COMP-",                 # Generic compensation
+    "BioComp-", "biocomp-", "BIOCOMP-",       # Bio-Rad compensation  
+    "CytoComp-", "cytocomp-", "CYTOCOMP-",    # Cytometer-specific
+    "SpillComp-", "spillcomp-", "SPILLCOMP-", # Spillover compensation
+    "FC-", "fc-", "FC_", "fc_",               # Flow cytometry prefixes
+    "Ch-", "ch-", "CH-", "Channel-", "channel-", "CHANNEL-"  # Channel prefixes
+  )
+  
+  for (prefix in common_prefixes) {
+    if (startsWith(ch, prefix)) {
+      ch <- substring(ch, nchar(prefix) + 1)
+      break
+    }
+  }
+  
+  # Normalize separators and spacing
+  ch <- gsub("\\s+", " ", ch)        # Multiple spaces to single space
+  ch <- gsub("_+", "_", ch)          # Multiple underscores to single
+  ch <- gsub("-+", "-", ch)          # Multiple hyphens to single
+  ch <- trimws(ch)                   # Remove leading/trailing whitespace
+  
+  # Normalize wavelength formats: 450_50, 450/50, 450-50 → 450_50
+  ch <- gsub("([0-9]{3,4})[/-]([0-9]{2,3})", "\\1_\\2", ch)
+  
+  # Normalize measurement suffixes: ensure consistent format
+  # Convert various suffix formats to standard -A, -H, -W
+  ch <- gsub("[-_\\s]*(Area|area|AREA)\\s*$", "-A", ch)
+  ch <- gsub("[-_\\s]*(Height|height|HEIGHT)\\s*$", "-H", ch)  
+  ch <- gsub("[-_\\s]*(Width|width|WIDTH)\\s*$", "-W", ch)
+  
+  # Standardize common measurement suffixes
+  ch <- gsub("[-_\\s]*A\\s*$", "-A", ch)
+  ch <- gsub("[-_\\s]*H\\s*$", "-H", ch)
+  ch <- gsub("[-_\\s]*W\\s*$", "-W", ch)
+  
+  # Normalize fluorophore names (case-insensitive)
+  fluor_mappings <- list(
+    c("fitc", "FITC"),
+    c("pe", "PE"), 
+    c("apc", "APC"),
+    c("percp", "PerCP", "PERCP"),
+    c("cy5", "Cy5", "CY5"),
+    c("cy7", "Cy7", "CY7"),
+    c("texas\\s*red", "Texas Red", "TEXAS RED", "TexasRed"),
+    c("pacific\\s*blue", "Pacific Blue", "PACIFIC BLUE", "PacificBlue"),
+    c("brilliant\\s*violet", "Brilliant Violet", "BRILLIANT VIOLET", "BrilliantViolet")
+  )
+  
+  for (mapping in fluor_mappings) {
+    standard_name <- mapping[1]
+    for (variant in mapping[-1]) {
+      ch <- gsub(paste0("\\b", variant, "\\b"), standard_name, ch, ignore.case = TRUE)
+    }
+  }
+  
+  return(ch)
+}
+
+# Enhanced channel matching with normalization
+findChannelMatches <- function(matrix_channels, file_channels) {
+  
+  # Normalize all channel names
+  norm_matrix <- sapply(matrix_channels, normalizeChannelName)
+  norm_file <- sapply(file_channels, normalizeChannelName)
+  
+  # Create mapping results
+  matches <- list()
+  
+  for (i in seq_along(matrix_channels)) {
+    matrix_ch <- matrix_channels[i]
+    norm_matrix_ch <- norm_matrix[i]
+    
+    # First try exact match on normalized names
+    exact_match_idx <- which(norm_file == norm_matrix_ch)
+    
+    if (length(exact_match_idx) > 0) {
+      matches[[matrix_ch]] <- list(
+        found = TRUE,
+        file_channel = file_channels[exact_match_idx[1]],
+        match_type = "exact_normalized",
+        confidence = 1.0
+      )
+    } else {
+      # Try fuzzy matching on normalized names
+      fuzzy_scores <- sapply(norm_file, function(fc) {
+        # Calculate similarity score
+        if (nchar(norm_matrix_ch) == 0 || nchar(fc) == 0) return(0)
+        
+        # Exact substring match gets high score
+        if (grepl(norm_matrix_ch, fc, fixed = TRUE) || grepl(fc, norm_matrix_ch, fixed = TRUE)) {
+          return(0.9)
+        }
+        
+        # String distance-based similarity
+        max_len <- max(nchar(norm_matrix_ch), nchar(fc))
+        if (max_len == 0) return(0)
+        
+        distance <- adist(norm_matrix_ch, fc, ignore.case = TRUE)[1]
+        similarity <- 1 - (distance / max_len)
+        
+        return(similarity)
+      })
+      
+      best_match_idx <- which.max(fuzzy_scores)
+      best_score <- fuzzy_scores[best_match_idx]
+      
+      if (best_score > 0.7) {  # Threshold for fuzzy matching
+        matches[[matrix_ch]] <- list(
+          found = TRUE,
+          file_channel = file_channels[best_match_idx],
+          match_type = "fuzzy_normalized", 
+          confidence = best_score
+        )
+      } else {
+        matches[[matrix_ch]] <- list(
+          found = FALSE,
+          file_channel = NA,
+          match_type = "no_match",
+          confidence = 0.0
+        )
+      }
+    }
+  }
+  
+  return(matches)
+}
+
+# Helper function to create compatibility issue details
+createCompatibilityIssue <- function(channel_matches, file_channels, matrix_channels, error_message = "") {
+  
+  # Extract match information
+  matched_channels <- character()
+  fuzzy_matches <- character()
+  unmatched_channels <- character()
+  
+  for (matrix_ch in names(channel_matches)) {
+    match_info <- channel_matches[[matrix_ch]]
+    
+    if (match_info$found) {
+      if (match_info$match_type == "exact_normalized") {
+        matched_channels <- c(matched_channels, paste0(matrix_ch, " ✓ ", match_info$file_channel))
+      } else {
+        confidence_pct <- round(match_info$confidence * 100)
+        fuzzy_matches <- c(fuzzy_matches, paste0(matrix_ch, " → ", match_info$file_channel, " (", confidence_pct, "%)"))
+      }
+    } else {
+      unmatched_channels <- c(unmatched_channels, matrix_ch)
+    }
+  }
+  
+  return(list(
+    missing = unmatched_channels,
+    file_channels = file_channels,
+    matrix_channels = matrix_channels,
+    matched_channels = matched_channels,
+    fuzzy_matches = fuzzy_matches,
+    unmatched = unmatched_channels,
+    error_message = error_message
+  ))
+}
+
+# Helper function to show detailed channel compatibility report
+showChannelCompatibilityReport <- function(compatibility_issues, all_file_names) {
+  
+  report_lines <- character()
+  
+  # Header
+  report_lines <- c(report_lines, 
+                   "🔍 CHANNEL COMPATIBILITY ANALYSIS",
+                   "=====================================")
+  
+  # Summary
+  n_issues <- length(compatibility_issues)
+  n_total <- length(all_file_names)
+  n_success <- n_total - n_issues
+  
+  report_lines <- c(report_lines,
+                   paste0("📊 SUMMARY: ", n_success, " files compensated successfully, ", n_issues, " files failed"),
+                   "")
+  
+  # Detailed breakdown for each problematic file
+  for (file_name in names(compatibility_issues)) {
+    issue <- compatibility_issues[[file_name]]
+    
+    report_lines <- c(report_lines,
+                     paste0("❌ FILE: ", file_name))
+    
+    # Show error message if any
+    if (!is.null(issue$error_message) && issue$error_message != "") {
+      report_lines <- c(report_lines,
+                       paste0("   Error: ", issue$error_message))
+    }
+    
+    # Show successful matches
+    if (!is.null(issue$matched_channels) && length(issue$matched_channels) > 0) {
+      report_lines <- c(report_lines,
+                       "   ✅ Successful matches:")
+      for (match in issue$matched_channels) {
+        report_lines <- c(report_lines, paste0("      ", match))
+      }
+    }
+    
+    # Show fuzzy matches if any
+    if (length(issue$fuzzy_matches) > 0) {
+      report_lines <- c(report_lines,
+                       "   🔍 Fuzzy matches found:")
+      for (match in issue$fuzzy_matches) {
+        report_lines <- c(report_lines, paste0("      ", match))
+      }
+    }
+    
+    # Show completely unmatched channels
+    if (length(issue$unmatched) > 0) {
+      report_lines <- c(report_lines,
+                       paste0("   ⚠️ No matches found for: ", paste(issue$unmatched, collapse = ", ")))
+    }
+    
+    # Show first few channels in the file for reference
+    n_show <- min(8, length(issue$file_channels))
+    sample_channels <- paste(issue$file_channels[1:n_show], collapse = ", ")
+    if (length(issue$file_channels) > n_show) {
+      sample_channels <- paste0(sample_channels, "...")
+    }
+    
+    report_lines <- c(report_lines,
+                     paste0("   📋 File channels: ", sample_channels),
+                     "")
+  }
+  
+  # Show matrix channels for reference
+  if (n_issues > 0) {
+    first_issue <- compatibility_issues[[1]]
+    report_lines <- c(report_lines,
+                     "🎯 REQUIRED CHANNELS (from spillover matrix):",
+                     paste0("   ", paste(first_issue$matrix_channels, collapse = ", ")),
+                     "")
+  }
+  
+  # Recommendations
+  report_lines <- c(report_lines,
+                   "💡 RECOMMENDATIONS:",
+                   "   1. ✅ Auto-mapping activated: FJComp-, Comp- and other common prefixes are handled",
+                   "   2. ✅ Fuzzy matching enabled: Similar channel names are automatically detected",
+                   "   3. 🔧 For remaining issues: Check if experimental files use the same acquisition panel",
+                   "   4. 🔄 Alternative: Recompute spillover matrix using files with matching channel names",
+                   "   5. ⚙️ Threshold: 80% of channels must match for automatic compensation",
+                   "")
+  
+  # Show the report as a notification
+  report_text <- paste(report_lines, collapse = "\n")
+  
+  # Split into chunks for multiple notifications (due to character limits)
+  max_chars <- 2000
+  if (nchar(report_text) > max_chars) {
+    # Show summary notification first
+    summary_text <- paste(report_lines[1:6], collapse = "\n")
+    showNotification(summary_text, type = "error", duration = 15)
+    
+    # Show detailed issues in console/log
+    cat("\n", report_text, "\n")
+    message("Channel compatibility report written to console - check R console for full details")
+  } else {
+    showNotification(report_text, type = "error", duration = 15)
+  }
+  
+  # Also log to console for easy copying
+  cat("\n=== CHANNEL COMPATIBILITY REPORT ===\n")
+  cat(report_text)
+  cat("\n===================================\n\n")
+}

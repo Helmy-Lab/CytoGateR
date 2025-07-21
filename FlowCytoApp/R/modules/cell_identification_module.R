@@ -11,11 +11,8 @@ cellIdentificationModuleUI <- function(id) {
       div(class = "parameter-group",
           h5(icon("shield-alt"), "Quality Control"),
           checkboxInput(ns("performQC"), "Perform Quality Control", value = TRUE),
-          conditionalPanel(
-            condition = paste0("input['", ns("performQC"), "'] === true"),
-            selectInput(ns("qcVariable"), "QC Variable", choices = NULL),
-            sliderInput(ns("qcThreshold"), "QC Threshold Range", min = 0, max = 100000, value = c(100, 10000))
-          )
+          # Replace conditionalPanel with server-side rendering
+          uiOutput(ns("qcOptionsUI"))
       ),
       
       tags$hr(),
@@ -24,16 +21,8 @@ cellIdentificationModuleUI <- function(id) {
       div(class = "parameter-group",
           h5(icon("filter"), "Gating"),
           checkboxInput(ns("performGating"), "Perform Gating", value = TRUE),
-          conditionalPanel(
-            condition = paste0("input['", ns("performGating"), "'] === true"),
-            selectizeInput(ns("debrisGate"), "FSC/SSC Parameters", choices = NULL, multiple = TRUE),
-            selectInput(ns("liveDeadGate"), "Live/Dead Marker", choices = NULL, selected = "None"),
-            conditionalPanel(
-              condition = paste0("input['", ns("liveDeadGate"), "'] !== 'None'"),
-              numericInput(ns("liveDeadThreshold"), "Live/Dead Threshold", value = 1000, min = 0, max = 10000),
-              helpText("Cells with values below this threshold will be considered live.")
-            )
-          )
+          # Replace conditionalPanel with server-side rendering
+          uiOutput(ns("gatingOptionsUI"))
       ),
       
       tags$hr(),
@@ -53,10 +42,51 @@ cellIdentificationModuleUI <- function(id) {
     )
   )
 }
+
 # cellIdentificationModuleServer.R
 cellIdentificationModuleServer <- function(id, data_reactive) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+    
+    # ============================================================================
+    # SERVER-SIDE CONDITIONAL UI RENDERING
+    # ============================================================================
+    
+    # QC options UI
+    output$qcOptionsUI <- renderUI({
+      if (isTRUE(input$performQC)) {
+        tagList(
+          selectInput(session$ns("qcVariable"), "QC Variable", choices = NULL),
+          sliderInput(session$ns("qcThreshold"), "QC Threshold Range", min = 0, max = 100000, value = c(100, 10000))
+        )
+      }
+    })
+    
+    # Gating options UI
+    output$gatingOptionsUI <- renderUI({
+      if (isTRUE(input$performGating)) {
+        tagList(
+          selectizeInput(session$ns("debrisGate"), "FSC/SSC Parameters", choices = NULL, multiple = TRUE),
+          selectInput(session$ns("liveDeadGate"), "Live/Dead Marker", choices = NULL, selected = "None"),
+          # Live/Dead threshold conditionally rendered
+          uiOutput(session$ns("liveDeadThresholdUI"))
+        )
+      }
+    })
+    
+    # Live/Dead threshold UI
+    output$liveDeadThresholdUI <- renderUI({
+      if (!is.null(input$liveDeadGate) && input$liveDeadGate != "None") {
+        tagList(
+          numericInput(session$ns("liveDeadThreshold"), "Live/Dead Threshold", value = 1000, min = 0, max = 10000),
+          helpText("Cells with values below this threshold will be considered live.")
+        )
+      }
+    })
+    
+    # ============================================================================
+    # END OF SERVER-SIDE CONDITIONAL UI RENDERING
+    # ============================================================================
     
     # Populate choices dynamically based on uploaded data
     observe({

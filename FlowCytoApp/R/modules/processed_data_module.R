@@ -82,37 +82,8 @@ processedDataModuleUI <- function(id) {
                         selected = "t-SNE")
           ),
           
-          # Method-specific parameters
-          conditionalPanel(
-            condition = paste0("input['", ns("dimred_method"), "'] === 't-SNE'"),
-            div(class = "method-controls",
-              h6(icon("cog"), "t-SNE Parameters"),
-              numericInput(ns("perplexity_cleaned"), "Perplexity:", value = 5, min = 2, max = 50)
-            )
-          ),
-          conditionalPanel(
-            condition = paste0("input['", ns("dimred_method"), "'] === 'UMAP'"),
-            div(class = "method-controls",
-              h6(icon("cog"), "UMAP Parameters"),
-              numericInput(ns("neighbors"), "n_neighbors:", value = 5, min = 2, max = 100),
-              numericInput(ns("min_dist"), "min_dist:", value = 0.1, min = 0, max = 1, step = 0.05)
-            )
-          ),
-          conditionalPanel(
-            condition = paste0("input['", ns("dimred_method"), "'] === 'PCA'"),
-            div(class = "method-controls",
-              h6(icon("cog"), "PCA Parameters"),
-              numericInput(ns("pca_components"), "Number of Components:", value = 2, min = 2, max = 10)
-            )
-          ),
-          conditionalPanel(
-            condition = paste0("input['", ns("dimred_method"), "'] === 'MDS'"),
-            div(class = "method-controls",
-              h6(icon("cog"), "MDS Parameters"),
-              p("MDS uses Euclidean distances by default."),
-              tags$small("Note: MDS can be slow for large datasets.")
-            )
-          )
+          # Method-specific parameters (replace conditionalPanels with server-side rendering)
+          uiOutput(ns("methodParametersUI"))
         ),
         
         # Clustering and Visualization Section
@@ -194,7 +165,43 @@ processedDataModuleUI <- function(id) {
 #' @return List with processed data analysis results
 processedDataModuleServer <- function(id, app_state) {
   moduleServer(id, function(input, output, session) {
+
+    # Method-specific parameters UI
+    output$methodParametersUI <- renderUI({
+      req(input$dimred_method)
+      
+      method <- input$dimred_method
+      
+      if (method == "t-SNE") {
+        div(class = "method-controls", style = "background-color: #e3f2fd; padding: 10px; border-radius: 5px; margin: 10px 0;",
+          h6(icon("cog"), "t-SNE Parameters"),
+          numericInput(session$ns("perplexity_cleaned"), "Perplexity:", value = 5, min = 2, max = 50),
+          helpText("Lower perplexity values work better for smaller datasets.")
+        )
+      } else if (method == "UMAP") {
+        div(class = "method-controls", style = "background-color: #f3e5f5; padding: 10px; border-radius: 5px; margin: 10px 0;",
+          h6(icon("cog"), "UMAP Parameters"),
+          numericInput(session$ns("neighbors"), "n_neighbors:", value = 5, min = 2, max = 100),
+          helpText("Number of neighboring points used in local approximations."),
+          numericInput(session$ns("min_dist"), "min_dist:", value = 0.1, min = 0, max = 1, step = 0.05),
+          helpText("Minimum distance apart that points are allowed to be in the low dimensional representation.")
+        )
+      } else if (method == "PCA") {
+        div(class = "method-controls", style = "background-color: #e8f5e8; padding: 10px; border-radius: 5px; margin: 10px 0;",
+          h6(icon("cog"), "PCA Parameters"),
+          numericInput(session$ns("pca_components"), "Number of Components:", value = 2, min = 2, max = 10),
+          helpText("Number of principal components to compute and display.")
+        )
+      } else if (method == "MDS") {
+        div(class = "method-controls", style = "background-color: #fff3e0; padding: 10px; border-radius: 5px; margin: 10px 0;",
+          h6(icon("cog"), "MDS Parameters"),
+          p("MDS uses Euclidean distances by default."),
+          tags$small("Note: MDS can be slow for large datasets.")
+        )
+      }
+    })
     
+
     # Reactive values to store processed data
     cleaned_data <- reactive({
       req(input$cleanedFile)
