@@ -66,12 +66,14 @@ CytoVerse runs in your web browser and supports:
 
 ### Global Plot Settings
 
+<img width="852" height="898" alt="image" src="https://github.com/user-attachments/assets/a76122e9-750e-4ce9-9c3d-df679f219a53" />
+
 This allows the plots to be visually adjusted. The width and height of the plot can be changed accordingly by dragging the pointer along the scale. Similarly, by dragging on the pointer on the scale, moving left or right the font size as well as the sizes of the points on the graph can be changed. Finally, the color palette can be customized by selecting the color circle next to the palette selector. The tool offers a variety of options, including colorblindfriendly palettes, as well as categorical, sequential, and diverging schemes to enhance data interpretation.
 
 **Plot Dimensions:**
-- **Width/Height**: Drag the pointer along the scale to adjust plot size (default: 800x600 pixels)
-- **Optimal for presentations**: 1024x768 pixels
-- **Optimal for publications**: 600x400 pixels (fits journal requirements)
+- **Width/Height**: Drag the pointer along the scale to adjust plot size (default: 600x600 pixels)
+- **Optimal for presentations**: 800x800 pixels
+- **Optimal for publications**: 600x600 pixels (fits journal requirements)
 
 **Typography:**
 - **Font Size**: Drag the pointer on the scale left or right to adjust text size for better readability (range: 8-24px)
@@ -102,6 +104,8 @@ Spillover occurs when fluorophores emit light that bleeds into adjacent detectio
    - **Single-stain controls** for each fluorophore (minimum 2 required): Cells stained with only one fluorophore each - measures spillover from that specific fluorophore into other channels
    - **Experimental samples**: Your actual samples with multiple fluorophores
 
+<img width="1240" height="1162" alt="image" src="https://github.com/user-attachments/assets/d8d15ee7-5e39-484d-a59f-10ef0a927e31" />
+
 2. **Auto-detected channel formats:**
    - FL formats: FL1-A, FL2-H, FL3-W
    - Laser wavelength: 405 D 525_50-A, 488/530-A
@@ -114,6 +118,12 @@ Spillover occurs when fluorophores emit light that bleeds into adjacent detectio
 1. **Select unstained control** from uploaded files
 2. **Assign single-stain controls** to each detected channel
 3. Click **"Validate File Assignment"** to save assignments
+
+<img width="1221" height="1213" alt="image" src="https://github.com/user-attachments/assets/14089d2c-f4a4-49a6-955e-0498632863ec" />
+
+<img width="1212" height="360" alt="image" src="https://github.com/user-attachments/assets/57c6eb54-eb38-45f3-8138-16a9bbdd2b13" />
+
+<img width="1244" height="742" alt="image" src="https://github.com/user-attachments/assets/11496d30-8278-48dc-8a71-0f62b1eebb05" />
 
 ### Step 3: Generate Compensation Matrix
 
@@ -129,6 +139,8 @@ A mathematical matrix that defines how much signal from each fluorophore spills 
 - Matrix must be square with fluorophores as row/column names
 - Useful when you have standardized compensation from instrument software
 
+<img width="2491" height="956" alt="image" src="https://github.com/user-attachments/assets/b6298e6b-651a-4180-a9d9-6bafad77266d" />
+
 ### Step 4: Review & Edit Matrix
 
 - **Color coding:**
@@ -138,6 +150,8 @@ A mathematical matrix that defines how much signal from each fluorophore spills 
   - 🔴 Red: Very high (>10%)
 - Enable editing to modify values manually
 - Click **"Reset to Original"** to undo changes
+
+<img width="566" height="450" alt="image" src="https://github.com/user-attachments/assets/7431a498-d970-477b-8d84-75463e0f978a" />
 
 ### Step 5: Quality Control
 
@@ -160,6 +174,8 @@ A mathematical matrix that defines how much signal from each fluorophore spills 
 - **Compensated FCS files**: Download with "_compensated" suffix
 - **Spillover matrix**: Export as CSV or Excel
 - **Session data**: Save complete workflow for later use
+
+<img width="1222" height="865" alt="image" src="https://github.com/user-attachments/assets/2f639b97-cee0-4d19-95b4-d6e010694416" />
 
 ---
 
