@@ -13,7 +13,6 @@ img {
 .markdown-body img {
   width: 900px !important;
   height: auto !important;
-  max-width: none !important;
   margin: 30px auto !important;
 }
 
