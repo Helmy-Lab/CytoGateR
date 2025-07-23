@@ -66,7 +66,9 @@ CytoVerse runs in your web browser and supports:
 
 ### Global Plot Settings
 
+
 <img width="852" height="898" alt="image" src="https://github.com/user-attachments/assets/a76122e9-750e-4ce9-9c3d-df679f219a53" />
+
 
 This allows the plots to be visually adjusted. The width and height of the plot can be changed accordingly by dragging the pointer along the scale. Similarly, by dragging on the pointer on the scale, moving left or right the font size as well as the sizes of the points on the graph can be changed. Finally, the color palette can be customized by selecting the color circle next to the palette selector. The tool offers a variety of options, including colorblindfriendly palettes, as well as categorical, sequential, and diverging schemes to enhance data interpretation.
 
@@ -104,7 +106,9 @@ Spillover occurs when fluorophores emit light that bleeds into adjacent detectio
    - **Single-stain controls** for each fluorophore (minimum 2 required): Cells stained with only one fluorophore each - measures spillover from that specific fluorophore into other channels
    - **Experimental samples**: Your actual samples with multiple fluorophores
 
+
 <img width="1240" height="1162" alt="image" src="https://github.com/user-attachments/assets/d8d15ee7-5e39-484d-a59f-10ef0a927e31" />
+
 
 2. **Auto-detected channel formats:**
    - FL formats: FL1-A, FL2-H, FL3-W
@@ -119,11 +123,15 @@ Spillover occurs when fluorophores emit light that bleeds into adjacent detectio
 2. **Assign single-stain controls** to each detected channel
 3. Click **"Validate File Assignment"** to save assignments
 
+
 <img width="1221" height="1213" alt="image" src="https://github.com/user-attachments/assets/14089d2c-f4a4-49a6-955e-0498632863ec" />
+
 
 <img width="1212" height="360" alt="image" src="https://github.com/user-attachments/assets/57c6eb54-eb38-45f3-8138-16a9bbdd2b13" />
 
+
 <img width="1244" height="742" alt="image" src="https://github.com/user-attachments/assets/11496d30-8278-48dc-8a71-0f62b1eebb05" />
+
 
 ### Step 3: Generate Compensation Matrix
 
@@ -139,7 +147,9 @@ A mathematical matrix that defines how much signal from each fluorophore spills 
 - Matrix must be square with fluorophores as row/column names
 - Useful when you have standardized compensation from instrument software
 
+
 <img width="2491" height="956" alt="image" src="https://github.com/user-attachments/assets/b6298e6b-651a-4180-a9d9-6bafad77266d" />
+
 
 ### Step 4: Review & Edit Matrix
 
@@ -151,7 +161,9 @@ A mathematical matrix that defines how much signal from each fluorophore spills 
 - Enable editing to modify values manually
 - Click **"Reset to Original"** to undo changes
 
+
 <img width="566" height="450" alt="image" src="https://github.com/user-attachments/assets/7431a498-d970-477b-8d84-75463e0f978a" />
+
 
 ### Step 5: Quality Control
 
@@ -194,10 +206,14 @@ Start with broad populations (e.g., live cells) and progressively refine to spec
 **Choose one:**
 - Use preprocessed data from Raw Data tab
 - Load new FCS files directly
+- 
+<img width="600" height="347" alt="image" src="https://github.com/user-attachments/assets/81e703fa-a801-4cdb-96fc-6549d75494ee" />
 
 **Select parameters:**
 - Sample from dropdown
 - X and Y axis channels for 2D plots
+
+<img width="563" height="328" alt="image" src="https://github.com/user-attachments/assets/65421dbe-251e-407a-a16c-373c36e51932" />
 
 ### Step 2: Create Gates
 
@@ -208,6 +224,13 @@ Start with broad populations (e.g., live cells) and progressively refine to spec
    - **Static mode**: Click points or use brush selection
    - **Interactive mode**: Use plotly toolbar (box/lasso select)
 5. Click **"Save Gate"** when complete
+
+   
+<img width="575" height="619" alt="image" src="https://github.com/user-attachments/assets/fdf0a0be-e060-4347-8412-ef4ca38e480c" />
+
+
+<img width="1358" height="890" alt="image" src="https://github.com/user-attachments/assets/8fb38931-9f9e-44ae-b96c-c2c77d19d29d" />
+
 
 ### Step 3: Visualization Options
 
