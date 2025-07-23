@@ -3,20 +3,22 @@ layout: default
 title: CytoVerse Documentation
 ---
 
+<link rel="stylesheet" href="custom.css">
+
 # 🧬 CytoVerse Documentation
 
 **An Interactive Flow Cytometry Analysis Platform**
 
 ## 📖 Documentation
-- [Complete Manual](cytoverse_documentation.html) - Full comprehensive guide
-- [Getting Started](cytoverse_documentation.html#getting-started)
-- [Settings](cytoverse_documentation.html#settings)
-- [Spillover Compensation](cytoverse_documentation.html#spillover-compensation)
-- [Interactive Gating](cytoverse_documentation.html#interactive-gating)
-- [Raw Data Analysis](cytoverse_documentation.html#raw-data-analysis)
-- [Batch Analysis](cytoverse_documentation.html#batch-analysis)
-- [Processed Data](cytoverse_documentation.html#processed-data)
-- [Troubleshooting](cytoverse_documentation.html#troubleshooting)
+- [Complete Manual](documentation.html) - Full comprehensive guide
+- [Getting Started](documentation.html#getting-started)
+- [Settings](documentation.html#settings)
+- [Spillover Compensation](documentation.html#spillover-compensation)
+- [Interactive Gating](documentation.html#interactive-gating)
+- [Raw Data Analysis](documentation.html#raw-data-analysis)
+- [Batch Analysis](documentation.html#batch-analysis)
+- [Processed Data](documentation.html#processed-data)
+- [Troubleshooting](documentation.html#troubleshooting)
 
 ## About CytoVerse
 

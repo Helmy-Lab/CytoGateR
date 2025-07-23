@@ -51,14 +51,13 @@ ui <- navbarPage(
            rawDataModuleUI("raw_data")
   ),
 
-  # Tab for the Processed Data Module
-  tabPanel("Processed Data", 
-           processedDataModuleUI("processed_data")
-  ),
-  
   # Tab for the Batch Analysis Module
   tabPanel("Batch Analysis", 
            batchAnalysisModuleUI("batch_analysis")
+  ),
+    # Tab for the Processed Data Module
+  tabPanel("Processed Data", 
+           processedDataModuleUI("processed_data")
   )
 )
 
@@ -70,7 +69,7 @@ server <- function(input, output, session) {
       width = 800,
       height = 600,
       font_size = 16,
-      point_size = 6,
+      point_size = 2,
       color_palette = "viridis"
     )
   )

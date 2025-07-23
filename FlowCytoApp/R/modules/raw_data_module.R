@@ -25,13 +25,13 @@ rawDataModuleUI <- function(id) {
           border-radius: 5px;
           margin-bottom: 10px;
         }
-        .compensation-panel {
-          background-color: #f8f9fa;
-          padding: 15px;
-          border-radius: 8px;
-          margin-bottom: 10px;
-          border: 1px solid #dee2e6;
-        }
+        # .compensation-panel {
+        #   background-color: #f8f9fa;
+        #   padding: 15px;
+        #   border-radius: 8px;
+        #   margin-bottom: 10px;
+        #   border: 1px solid #dee2e6;
+        # }
         .method-controls {
           background-color: #f1f8e9;
           padding: 8px;
@@ -66,55 +66,16 @@ rawDataModuleUI <- function(id) {
           uiOutput(ns("markerSelectUI"))
         ),
         
-        # Spillover Compensation Section
-        shinydashboard::box(
-          title = "Spillover Compensation", status = "warning", solidHeader = TRUE,
-          width = 12, collapsible = TRUE, collapsed = TRUE,
-          
-          checkboxInput(ns("enableCompensation"), "Enable Spillover Compensation", value = FALSE),
-          
-          conditionalPanel(
-            condition = paste0("input['", ns("enableCompensation"), "'] === true"),
-            
-            div(class = "compensation-panel",
-              h5(icon("upload"), "Control Files"),
-              
-              # Upload multiple control files
-              fileInput(ns("controlFiles"), "Upload Control Files (FCS only)", 
-                        accept = c(".fcs"), multiple = TRUE),
-              
-              # Upload unstained control file
-              fileInput(ns("unstainedControlFile"), "Upload Unstained Control File (FCS only)", 
-                        accept = c(".fcs"), multiple = FALSE),
-              
-              # UI for assigning markers to control files
-              uiOutput(ns("markerAssignmentUI")),
-              
-              # Button to compute spillover matrix
-              actionButton(ns("computeSpillover"), "Compute Spillover Matrix", 
-                           class = "btn-info btn-block", 
-                           icon = icon("calculator"),
-                           style = "margin-bottom: 10px;"),
-              
-              # Display spillover computation status
-              verbatimTextOutput(ns("spilloverStatus"))
-            ),
-            
-            hr(),
-            
-            # Option to upload pre-computed spillover matrix
-            h5(icon("file-import"), "Import Existing Matrix"),
-            fileInput(ns("spilloverMatrixFile"), "Upload Pre-computed Spillover Matrix (CSV)", 
-                      accept = c(".csv")),
-            
-            # Display current spillover matrix
-            conditionalPanel(
-              condition = paste0("output['", ns("spilloverStatus"), "'] !== null"),
-              h5("Current Spillover Matrix:"),
-              DT::dataTableOutput(ns("spilloverMatrixDisplay"))
-            )
-          )
-        ),
+        # # Spillover Compensation Section
+        # shinydashboard::box(
+        #   title = "Spillover Compensation", status = "warning", solidHeader = TRUE,
+        #   width = 12, collapsible = TRUE, collapsed = TRUE,
+        #   
+        #   checkboxInput(ns("enableCompensation"), "Enable Spillover Compensation", value = FALSE),
+        #   
+        #   # Replace conditionalPanel with server-side rendering
+        #   uiOutput(ns("compensationSettingsUI"))
+        # ),
         
         # Data Transformation Section
         shinydashboard::box(
@@ -142,91 +103,30 @@ rawDataModuleUI <- function(id) {
                                selected = c("t-SNE", "UMAP"))
           ),
           
-          # t-SNE parameters
-          conditionalPanel(
-            condition = paste0("input['", ns("methods"), "'].includes('t-SNE')"),
-            div(class = "method-controls",
-              h6(icon("cog"), "t-SNE Parameters"),
-              numericInput(ns("perplexity"), "Perplexity", value = 30, min = 5, max = 50),
-              checkboxInput(ns("use_barnes_hut"), "Use Barnes-Hut Approximation (faster)", value = TRUE),
-              conditionalPanel(
-                condition = paste0("input['", ns("use_barnes_hut"), "']"),
-                sliderInput(ns("tsne_theta"), "Barnes-Hut theta", 
-                            min = 0.0, max = 1.0, value = 0.5, step = 0.1)
-              ),
-              conditionalPanel(
-                condition = paste0("!input['", ns("use_barnes_hut"), "']"),
-                div(class = "alert alert-warning", style = "padding: 8px; margin: 5px 0;",
-                    icon("exclamation-triangle"), " Exact t-SNE is very slow for datasets > 1000 cells.")
-              ),
-              numericInput(ns("tsne_max_iter"), "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
-            )
-          ),
-          
-          # UMAP parameters
-          conditionalPanel(
-            condition = paste0("input['", ns("methods"), "'].includes('UMAP')"),
-            div(class = "method-controls",
-              h6(icon("cog"), "UMAP Parameters"),
-              numericInput(ns("n_neighbors"), "n_neighbors", value = 15, min = 2, max = 100)
-            )
-          ),
-          
-          # PCA parameters
-          conditionalPanel(
-            condition = paste0("input['", ns("methods"), "'].includes('PCA')"),
-            div(class = "method-controls",
-              h6(icon("cog"), "PCA Parameters"),
-              numericInput(ns("pca_components"), "Number of Components", value = 2, min = 2, max = 10)
-            )
-          ),
-          
-          # MDS parameters
-          conditionalPanel(
-            condition = paste0("input['", ns("methods"), "'].includes('MDS')"),
-            div(class = "method-controls",
-              h6(icon("cog"), "MDS Parameters"),
-              p("MDS uses Euclidean distances by default."),
-              tags$small("Note: MDS can be slow for large datasets.")
-            )
-          )
+          # Replace conditionalPanels with server-side rendering
+          uiOutput(ns("dimensionalityMethodsUI"))
         ),
         
-        # Quality Control & Gating Section
+        # Quality Control Section (Gating moved to dedicated module)
         shinydashboard::box(
-          title = "Quality Control & Gating", status = "warning", solidHeader = TRUE,
+          title = "Quality Control", status = "warning", solidHeader = TRUE,
           width = 12, collapsible = TRUE,
           
           # QC options
           div(class = "parameter-group",
             h5(icon("shield-alt"), "Quality Control"),
             checkboxInput(ns("performQC"), "Perform Quality Control", value = TRUE),
-            conditionalPanel(
-              condition = paste0("input['", ns("performQC"), "'] === true"),
-              numericInput(ns("maxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
-            )
+            # Replace conditionalPanel with server-side rendering
+            uiOutput(ns("qcSettingsUI"))
           ),
           
-          # Gating options
-          div(class = "parameter-group",
-            h5(icon("filter"), "Cell Gating"),
-            checkboxInput(ns("performGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
-            conditionalPanel(
-              condition = paste0("input['", ns("performGating"), "'] === true"),
-              textInput(ns("debrisGate"), "FSC/SSC Parameters (comma-separated)", 
-                        value = "FSC-A,SSC-A"),
-              selectInput(ns("liveDeadGate"), "Live/Dead Parameter", 
-                          choices = c("None", "Live Dead BV570 Violet-610-A"),
-                          selected = "None"),
-              # Add live/dead threshold parameter
-              conditionalPanel(
-                condition = paste0("input['", ns("liveDeadGate"), "'] !== 'None'"),
-                numericInput(ns("liveDeadThreshold"), "Live/Dead Threshold", 
-                             value = 1000, min = 0, max = 10000, step = 100),
-                helpText("Cells with values below this threshold will be considered live")
-              )
-            )
-          )
+          # Gating options - COMMENTED OUT: Using dedicated gating module now
+          # div(class = "parameter-group",
+          #   h5(icon("filter"), "Cell Gating"),
+          #   checkboxInput(ns("performGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
+          #   # Replace conditionalPanel with server-side rendering
+          #   uiOutput(ns("gatingSettingsUI"))
+          # )
         ),
         
         # Clustering Section
@@ -288,7 +188,67 @@ rawDataModuleUI <- function(id) {
                      shinycssloaders::withSpinner(plotlyOutput(ns("pcaPlot"), height = "600px"))),
             tabPanel("MDS", 
                      br(),
-                     shinycssloaders::withSpinner(plotlyOutput(ns("mdsPlot"), height = "600px")))
+                     shinycssloaders::withSpinner(plotlyOutput(ns("mdsPlot"), height = "600px"))),
+            
+            # Marker Expression Heatmaps Tab
+            tabPanel("Marker Heatmaps", 
+                     br(),
+                     fluidRow(
+                       column(3,
+                         div(class = "parameter-group",
+                           h5(icon("fire"), "Heatmap Controls"),
+                           
+                           selectInput(ns("heatmapMarker"), "Select Marker:", 
+                                      choices = NULL, selected = NULL),
+                           
+                           selectInput(ns("heatmapDimMethod"), "Dimensionality Method:",
+                                      choices = NULL, selected = NULL),
+                           
+                           selectInput(ns("heatmapMethod"), "Visualization Method:",
+                                      choices = c("Scatter Plot" = "scatter",
+                                                 "Hexagonal Binning" = "hex",
+                                                 "Density Contours" = "density2d", 
+                                                 "Filled Contours" = "contour"),
+                                      selected = "scatter"),
+                           
+                           # Replace conditionalPanel with server-side rendering
+                           uiOutput(ns("heatmapBinsUI")),
+                           
+                           selectInput(ns("heatmapColorPalette"), "Color Palette:",
+                                      choices = c("Plasma" = "plasma",
+                                                 "Viridis" = "viridis",
+                                                 "Magma" = "magma",
+                                                 "Inferno" = "inferno"),
+                                      selected = "plasma"),
+                           
+                           hr(),
+                           
+                           # Marker Renaming Section
+                           h5(icon("edit"), "Marker Renaming"),
+                           actionButton(ns("showMarkerRenaming"), "Rename Markers", 
+                                       class = "btn-info btn-sm", icon = icon("edit"),
+                                       style = "width: 100%; margin-bottom: 10px;"),
+                           
+                           # Display current marker mappings
+                           uiOutput(ns("markerMappingSummary")),
+                           
+                           hr(),
+                           
+                           fluidRow(
+                             column(12,
+                               actionButton(ns("generateAllHeatmapsFast"), "Fast Grid View", 
+                                           class = "btn-primary", icon = icon("th"),
+                                           style = "width: 100%;")
+                             )
+                           )
+                         )
+                       ),
+                       column(9,
+                         # Ultra-fast grid view or individual heatmap
+                         uiOutput(ns("heatmapMainDisplay"))
+                       )
+                     )
+            )
           )
         ),
         
@@ -309,119 +269,49 @@ rawDataModuleUI <- function(id) {
           )
         ),
         
-        # Spillover Compensation Analysis
-        shinydashboard::box(
-          title = "Spillover Compensation Analysis", status = "warning", solidHeader = TRUE,
-          width = 12, collapsible = TRUE, collapsed = TRUE,
-          
-          conditionalPanel(
-            condition = paste0("input['", ns("enableCompensation"), "'] === true"),
-            fluidRow(
-              column(6,
-                     shinydashboard::box(
-                       title = "Spillover Matrix", status = "info", solidHeader = TRUE,
-                       width = 12,
-                       DT::dataTableOutput(ns("spilloverMatrixTable"))
-                     )
-              ),
-              column(6,
-                     shinydashboard::box(
-                       title = "Compensation Effects", status = "success", solidHeader = TRUE,
-                       width = 12,
-                       plotOutput(ns("compensationEffectsPlot"), height = "400px")
-                     )
-              )
-            ),
-            shinydashboard::box(
-              title = "Before vs After Compensation", status = "primary", solidHeader = TRUE,
-              width = 12,
-              plotOutput(ns("beforeAfterCompensationPlot"), height = "500px")
-            )
-          ),
-          conditionalPanel(
-            condition = paste0("input['", ns("enableCompensation"), "'] === false"),
-            div(class = "alert alert-info", style = "margin: 15px;",
-                icon("info-circle"), 
-                h5("Spillover Compensation Disabled"),
-                p("Enable spillover compensation in the sidebar to view compensation analysis.")
-            )
-          )
-        ),
+        # # Spillover Compensation Analysis
+        # shinydashboard::box(
+        #   title = "Spillover Compensation Analysis", status = "warning", solidHeader = TRUE,
+        #   width = 12, collapsible = TRUE, collapsed = TRUE,
+        #   
+        #   # Replace conditionalPanels with server-side rendering
+        #   uiOutput(ns("compensationAnalysisUI"))
+        # ),
         
-        # Live/Dead Analysis
-        shinydashboard::box(
-          title = "Live/Dead Cell Analysis", status = "success", solidHeader = TRUE,
-          width = 12, collapsible = TRUE, collapsed = TRUE,
+        # # Live/Dead Analysis
+        # shinydashboard::box(
+        #   title = "Live/Dead Cell Analysis", status = "success", solidHeader = TRUE,
+        #   width = 12, collapsible = TRUE, collapsed = TRUE,
           
-          fluidRow(
-            column(8, 
-              shinydashboard::box(
-                title = "Live/Dead Marker Distribution", status = "info", solidHeader = TRUE,
-                width = 12,
-                shinycssloaders::withSpinner(plotOutput(ns("liveDeadHistogram"), height = "400px"))
-              )
-            ),
-            column(4, 
-              shinydashboard::box(
-                title = "Gating Controls", status = "warning", solidHeader = TRUE,
-                width = 12,
-                uiOutput(ns("liveDeadMarkerUI")),
-                conditionalPanel(
-                  condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
-                  sliderInput(ns("liveDeadThresholdSlider"), "Threshold", 
-                              min = 0, max = 5000, value = 1000, step = 100),
-                  checkboxInput(ns("useLogScale"), "Use Log Scale for Visualization", value = TRUE),
-                  hr(),
-                  h5("Gating Results"),
-                  verbatimTextOutput(ns("liveDeadStats")),
-                  actionButton(ns("applyLiveDeadGating"), "Apply to Preprocessing", 
-                               class = "btn-primary", style = "width: 100%;")
-                )
-              )
-            )
-          ),
-          conditionalPanel(
-            condition = paste0("input['", ns("liveDeadMarkerSelect"), "'] !== 'None'"),
-            shinydashboard::box(
-              title = "2D Live/Dead Visualization", status = "success", solidHeader = TRUE,
-              width = 12,
-              plotOutput(ns("liveDeadScatter"), height = "400px")
-            )
-          )
-        ),
+        #   fluidRow(
+        #     column(8, 
+        #       shinydashboard::box(
+        #         title = "Live/Dead Marker Distribution", status = "info", solidHeader = TRUE,
+        #         width = 12,
+        #         shinycssloaders::withSpinner(plotOutput(ns("liveDeadHistogram"), height = "400px"))
+        #       )
+        #     ),
+        #     column(4, 
+        #       shinydashboard::box(
+        #         title = "Gating Controls", status = "warning", solidHeader = TRUE,
+        #         width = 12,
+        #         uiOutput(ns("liveDeadMarkerUI")),
+        #         # Replace conditionalPanel with server-side rendering
+        #         uiOutput(ns("liveDeadControlsUI"))
+        #       )
+        #     )
+        #   ),
+        #   # Replace conditionalPanel with server-side rendering
+        #   uiOutput(ns("liveDeadScatterUI"))
+        # ),
         
         # Cluster Analysis
         shinydashboard::box(
           title = "Cluster Analysis Results", status = "success", solidHeader = TRUE,
           width = 12, collapsible = TRUE,
           
-          conditionalPanel(
-            condition = paste0("input['", ns("clustering-showClusteringOptions"), "'] == true"),
-            tabsetPanel(
-              tabPanel("Cluster Visualization", 
-                       br(),
-                       div(style = "position: relative;",
-                           plotlyOutput(ns("clusterPlot"), height = "600px"))
-              ),
-              tabPanel("Cluster Profiles", 
-                       br(),
-                       shinycssloaders::withSpinner(plotOutput(ns("clusterHeatmap")))),
-              tabPanel("Cluster Statistics", 
-                       br(),
-                       DT::dataTableOutput(ns("clusterStats"))),
-              tabPanel("Identified Populations", 
-                       br(),
-                       DT::dataTableOutput(ns("populationTable")))
-            )
-          ),
-          conditionalPanel(
-            condition = paste0("input['", ns("clustering-showClusteringOptions"), "'] != true"),
-            div(class = "alert alert-info", style = "margin: 15px;",
-                icon("info-circle"), 
-                h5("Clustering Analysis Disabled"),
-                p("Enable clustering analysis in the sidebar to view cluster results.")
-            )
-          )
+          # Replace conditionalPanels with server-side rendering
+          uiOutput(ns("clusterAnalysisUI"))
         )
       )
     )
@@ -483,7 +373,7 @@ rawDataModuleServer <- function(id, app_state) {
           }
         }
         
-        cat("\nNote: For spillover compensation, use the fluorescence channels marked above.\n")
+        # cat("\nNote: For spillover compensation, use the fluorescence channels marked above.\n")  # COMMENTED OUT: Using dedicated compensation module
         cat("The parameter names ($P1N, $P2N, etc.) are internal identifiers.\n")
         cat("The descriptions show the actual marker names (e.g., CD3-FITC, CD4-PE).\n")
       } else {
@@ -603,8 +493,37 @@ rawDataModuleServer <- function(id, app_state) {
     # Store processed data
     processedData <- reactiveVal(NULL)
     
-    # Store spillover compensation data
-    spilloverData <- reactiveVal(NULL)
+    # # Store spillover compensation data  # COMMENTED OUT: Using dedicated compensation module
+    # spilloverData <- reactiveVal(NULL)
+    
+    # Store marker name mappings (technical name -> display name)
+    markerNameMappings <- reactiveVal(list())
+    
+    # Helper function to get display name for a marker
+    getMarkerDisplayName <- function(technical_name, mappings = markerNameMappings()) {
+      display_name <- mappings[[technical_name]]
+      if (is.null(display_name) || display_name == "") {
+        return(technical_name)  # Return technical name if no mapping
+      }
+      return(display_name)
+    }
+    
+    # Helper function to get technical name from display name
+    getTechnicalName <- function(display_name, mappings = markerNameMappings()) {
+      # Find technical name that maps to this display name
+      for (tech_name in names(mappings)) {
+        if (mappings[[tech_name]] == display_name) {
+          return(tech_name)
+        }
+      }
+      return(display_name)  # Return as-is if no mapping found
+    }
+    
+    # Helper function to get all display names for markers
+    getMarkerChoicesWithDisplayNames <- function(technical_markers, mappings = markerNameMappings()) {
+      display_names <- sapply(technical_markers, function(tech) getMarkerDisplayName(tech, mappings))
+      setNames(technical_markers, display_names)
+    }
     
     # Replace single mergedClusters reactive with a more comprehensive structure
     mergeHistory <- reactiveVal(list(
@@ -703,53 +622,53 @@ rawDataModuleServer <- function(id, app_state) {
       return(p)
     })
     
-    # Live/Dead stats output
-    output$liveDeadStats <- renderText({
-      req(rawFCS(), input$liveDeadMarkerSelect)
-      
-      # Only proceed if a marker is selected
-      if (input$liveDeadMarkerSelect == "None") {
-        return("No Live/Dead marker selected")
-      }
-      
-      # Extract values for the selected marker
-      if (inherits(rawFCS(), "flowFrame")) {
-        ld_marker <- input$liveDeadMarkerSelect
-        if (grepl(" - ", ld_marker)) {
-          ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
-        }
-        
-        if (!(ld_marker %in% colnames(exprs(rawFCS())))) {
-          return(paste("Marker", ld_marker, "not found in dataset"))
-        }
-        
-        ld_values <- exprs(rawFCS())[, ld_marker]
-      } else {
-        # For non-FCS files
-        if (!(input$liveDeadMarkerSelect %in% colnames(rawFCS()))) {
-          return(paste("Marker", input$liveDeadMarkerSelect, "not found in dataset"))
-        }
-        
-        ld_values <- rawFCS()[[input$liveDeadMarkerSelect]]
-      }
-      
-      # Calculate percentage of cells classified as live
-      total_cells <- length(ld_values)
-      live_cells <- sum(ld_values <= input$liveDeadThresholdSlider, na.rm = TRUE)
-      live_pct <- live_cells / total_cells * 100
-      
-      # Create a summary text
-      paste0(
-        "Total Cells: ", format(total_cells, big.mark = ","), "\n",
-        "Live Cells (below threshold): ", format(live_cells, big.mark = ","), "\n",
-        "Percentage of Live Cells: ", round(live_pct, 1), "%\n\n",
-        "Statistics for this marker:\n",
-        "Min: ", round(min(ld_values, na.rm = TRUE), 1), "\n",
-        "Max: ", round(max(ld_values, na.rm = TRUE), 1), "\n",
-        "Mean: ", round(mean(ld_values, na.rm = TRUE), 1), "\n",
-        "Median: ", round(median(ld_values, na.rm = TRUE), 1)
-      )
-    })
+    # Live/Dead stats output - COMMENTED OUT: Using dedicated gating module
+    # output$liveDeadStats <- renderText({
+    #   req(rawFCS(), input$liveDeadMarkerSelect)
+    #   
+    #   # Only proceed if a marker is selected
+    #   if (input$liveDeadMarkerSelect == "None") {
+    #     return("No Live/Dead marker selected")
+    #   }
+    #   
+    #   # Extract values for the selected marker
+    #   if (inherits(rawFCS(), "flowFrame")) {
+    #     ld_marker <- input$liveDeadMarkerSelect
+    #     if (grepl(" - ", ld_marker)) {
+    #       ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
+    #     }
+    #     
+    #     if (!(ld_marker %in% colnames(exprs(rawFCS())))) {
+    #       return(paste("Marker", ld_marker, "not found in dataset"))
+    #     }
+    #     
+    #     ld_values <- exprs(rawFCS())[, ld_marker]
+    #   } else {
+    #     # For non-FCS files
+    #     if (!(input$liveDeadMarkerSelect %in% colnames(rawFCS()))) {
+    #       return(paste("Marker", input$liveDeadMarkerSelect, "not found in dataset"))
+    #     }
+    #     
+    #     ld_values <- rawFCS()[[input$liveDeadMarkerSelect]]
+    #   }
+    #   
+    #   # Calculate percentage of cells classified as live
+    #   total_cells <- length(ld_values)
+    #   live_cells <- sum(ld_values <= input$liveDeadThresholdSlider, na.rm = TRUE)
+    #   live_pct <- live_cells / total_cells * 100
+    #   
+    #   # Create a summary text
+    #   paste0(
+    #     "Total Cells: ", format(total_cells, big.mark = ","), "\n",
+    #     "Live Cells (below threshold): ", format(live_cells, big.mark = ","), "\n",
+    #     "Percentage of Live Cells: ", round(live_pct, 1), "%\n\n",
+    #     "Statistics for this marker:\n",
+    #     "Min: ", round(min(ld_values, na.rm = TRUE), 1), "\n",
+    #     "Max: ", round(max(ld_values, na.rm = TRUE), 1), "\n",
+    #     "Mean: ", round(mean(ld_values, na.rm = TRUE), 1), "\n",
+    #     "Median: ", round(median(ld_values, na.rm = TRUE), 1)
+    #   )
+    # })
     
     # FSC vs Live/Dead scatter plot to visualize gating
     output$liveDeadScatter <- renderPlot({
@@ -923,267 +842,703 @@ rawDataModuleServer <- function(id, app_state) {
         # Filter out non-fluorescence channels (keep only relevant markers)
         fluorescence_channels <- choices[!grepl("^(FSC|SSC|Time|Width|Height)", names(choices))]
         
-        # Add instructional text
-        instructions <- div(
-          class = "alert alert-info",
-          h5("Spillover Compensation Setup Instructions:"),
-          tags$ol(
-            tags$li("Upload your ", tags$strong("unstained control"), " file above"),
-            tags$li("Upload your ", tags$strong("single-stain control"), " files (one per fluorophore)"),
-            tags$li("Assign each single-stain control to its corresponding marker below"),
-            tags$li("Click 'Compute Spillover Matrix' when all files are assigned")
-          ),
-          p(tags$em("Note: You need one single-stain control for each fluorescent marker you want to compensate."))
-        )
+        # # Add instructional text  # COMMENTED OUT: Using dedicated compensation module
+        # instructions <- div(
+        #   class = "alert alert-info",
+        #   h5("Spillover Compensation Setup Instructions:"),
+        #   tags$ol(
+        #     tags$li("Upload your ", tags$strong("unstained control"), " file above"),
+        #     tags$li("Upload your ", tags$strong("single-stain control"), " files (one per fluorophore)"),
+        #     tags$li("Assign each single-stain control to its corresponding marker below"),
+        #     tags$li("Click 'Compute Spillover Matrix' when all files are assigned")
+        #   ),
+        #   p(tags$em("Note: You need one single-stain control for each fluorescent marker you want to compensate."))
+        # )
         
-        # Create UI for each uploaded control file
-        control_file_names <- input$controlFiles$name
+        # # Create UI for each uploaded control file  # COMMENTED OUT: Using dedicated compensation module
+        # control_file_names <- input$controlFiles$name
+        # 
+        # ui_elements <- lapply(1:length(control_file_names), function(i) {
+        #   file_name <- control_file_names[i]
+        #   div(
+        #     style = "margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px;",
+        #     h5(paste("Single-Stain Control:", file_name)),
+        #     p(style = "font-size: 0.9em; color: #666;", 
+        #       "This file should contain cells stained with ONLY ONE fluorophore. Assign it to the corresponding marker:"),
+        #     selectInput(
+        #       inputId = session$ns(paste0("marker_", i)),
+        #       label = "Assign to Marker:",
+        #       choices = c("Select marker..." = "", fluorescence_channels),
+        #       selected = "",
+        #       width = "100%"
+        #     )
+        #   )
+        # })
+        # 
+        # do.call(tagList, c(list(instructions), ui_elements))
         
-        ui_elements <- lapply(1:length(control_file_names), function(i) {
-          file_name <- control_file_names[i]
-          div(
-            style = "margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px;",
-            h5(paste("Single-Stain Control:", file_name)),
-            p(style = "font-size: 0.9em; color: #666;", 
-              "This file should contain cells stained with ONLY ONE fluorophore. Assign it to the corresponding marker:"),
-            selectInput(
-              inputId = session$ns(paste0("marker_", i)),
-              label = "Assign to Marker:",
-              choices = c("Select marker..." = "", fluorescence_channels),
-              selected = "",
-              width = "100%"
-            )
-          )
-        })
+        # Placeholder for compensation functionality
+        div(class = "alert alert-info",
+            icon("info-circle"), 
+            " Spillover compensation has been moved to the dedicated Compensation module.")
         
-        do.call(tagList, c(list(instructions), ui_elements))
       } else {
         div(class = "alert alert-warning",
             "Please upload main FCS file first to see available markers")
       }
     })
     
-    # Compute spillover matrix
-    observeEvent(input$computeSpillover, {
-      req(input$controlFiles, input$unstainedControlFile)
+    # # Compute spillover matrix  # COMMENTED OUT: Using dedicated compensation module
+    # observeEvent(input$computeSpillover, {
+    #   req(input$controlFiles, input$unstainedControlFile)
+    #   
+    #   # Check if unstained control is uploaded
+    #   if (is.null(input$unstainedControlFile)) {
+    #     showNotification("Please upload an unstained control file", type = "error")
+    #     return()
+    #   }
+    #   
+    #   # Get marker assignments
+    #   marker_assignments <- list()
+    #   control_file_paths <- list()
+    #   
+    #   for (i in 1:nrow(input$controlFiles)) {
+    #     marker_input_id <- paste0("marker_", i)
+    #     if (!is.null(input[[marker_input_id]]) && input[[marker_input_id]] != "") {
+    #       file_name <- input$controlFiles$name[i]
+    #       file_path <- input$controlFiles$datapath[i]
+    #       
+    #       marker_assignments[[file_name]] <- input[[marker_input_id]]
+    #       control_file_paths[[file_name]] <- file_path
+    #     }
+    #   }
+    #   
+    #   if (length(marker_assignments) < 2) {
+    #     showNotification("Please assign at least 2 control files to markers", type = "error")
+    #     return()
+    #   }
+    #   
+    #   # Add unstained control
+    #   unstained_file_path <- input$unstainedControlFile$datapath
+    #   unstained_file_name <- input$unstainedControlFile$name
+    #   
+    #   # Compute spillover matrix
+    #   withProgress(message = 'Computing spillover matrix...', value = 0, {
+    #     incProgress(0.5, detail = "Processing control files...")
+    #     
+    #     spillover_result <- computeSpilloverMatrix(control_file_paths, marker_assignments, 
+    #                                              unstained_file_path, unstained_file_name)
+    #     
+    #     incProgress(0.5, detail = "Finalizing matrix...")
+    #     
+    #     if (spillover_result$success) {
+    #       # Store the spillover data
+    #       spilloverData(spillover_result)
+    #       
+    #       showNotification(spillover_result$message, type = "message", duration = 5)
+    #     } else {
+    #       showNotification(spillover_result$message, type = "error", duration = 10)
+    #     }
+    #   })
+    # })
+    
+    # # Handle pre-computed spillover matrix upload  # COMMENTED OUT: Using dedicated compensation module
+    # observeEvent(input$spilloverMatrixFile, {
+    #   req(input$spilloverMatrixFile)
+    #   
+    #   tryCatch({
+    #     # Read CSV file
+    #     spillover_matrix <- read.csv(input$spilloverMatrixFile$datapath, row.names = 1)
+    #     spillover_matrix <- as.matrix(spillover_matrix)
+    #     
+    #     # Validate the matrix
+    #     if (!is.null(rawFCS()) && inherits(rawFCS(), "flowFrame")) {
+    #       validation_result <- validateSpilloverMatrix(spillover_matrix, colnames(exprs(rawFCS())))
+    #       
+    #       if (validation_result$valid) {
+    #         # Store the spillover data
+    #         spilloverData(list(
+    #           spillover_matrix = spillover_matrix,
+    #           success = TRUE,
+    #           message = paste("Pre-computed spillover matrix loaded:", validation_result$message)
+    #         ))
+    #         
+    #         showNotification("Spillover matrix loaded successfully", type = "message")
+    #       } else {
+    #         showNotification(validation_result$message, type = "error")
+    #       }
+    #     } else {
+    #       # Store without validation if no main data loaded yet
+    #       spilloverData(list(
+    #         spillover_matrix = spillover_matrix,
+    #         success = TRUE,
+    #         message = "Pre-computed spillover matrix loaded (not yet validated)"
+    #       ))
+    #       
+    #       showNotification("Spillover matrix loaded (will be validated when main data is loaded)", type = "message")
+    #     }
+    #     
+    #   }, error = function(e) {
+    #     showNotification(paste("Error loading spillover matrix:", e$message), type = "error")
+    #   })
+    # })
+    
+    # # Display spillover status  # COMMENTED OUT: Using dedicated compensation module
+    # output$spilloverStatus <- renderText({
+    #   if (!is.null(spilloverData())) {
+    #     spilloverData()$message
+    #   } else {
+    #     "No spillover matrix computed or loaded yet."
+    #   }
+    # })
+    # 
+    # # Display spillover matrix in sidebar
+    # output$spilloverMatrixDisplay <- DT::renderDataTable({
+    #   req(spilloverData(), spilloverData()$success)
+    #   
+    #   DT::datatable(
+    #     round(spilloverData()$spillover_matrix, 4),
+    #     options = list(scrollX = TRUE, pageLength = 10)
+    #   )
+    # })
+    # 
+    # # Display spillover matrix in main panel
+    # output$spilloverMatrixTable <- DT::renderDataTable({
+    #   req(spilloverData(), spilloverData()$success)
+    #   
+    #   DT::datatable(
+    #     round(spilloverData()$spillover_matrix, 4),
+    #     options = list(scrollX = TRUE, pageLength = 15),
+    #     caption = "Spillover Matrix (values represent spillover from column to row)"
+    #   ) %>% formatRound(columns = 1:ncol(spilloverData()$spillover_matrix), digits = 4)
+    # })
+    
+    # # Plot compensation effects
+    # output$compensationEffectsPlot <- renderPlot({
+    #   req(spilloverData(), spilloverData()$success)
+    #   
+    #   # Get font size from app settings
+    #   font_size <- app_state$plot_settings$font_size
+    #   
+    #   spillover_matrix <- spilloverData()$spillover_matrix
+    #   
+    #   # Use the utility function to create the heatmap
+    #   createSpilloverHeatmap(spillover_matrix, 
+    #                         title = "Spillover Matrix Heatmap", 
+    #                         font_size = font_size)
+    # }, width = function() app_state$plot_settings$width,
+    # height = function() app_state$plot_settings$height)
+    # 
+    # # Plot before vs after compensation comparison
+    # output$beforeAfterCompensationPlot <- renderPlot({
+    #   req(rawFCS(), spilloverData(), spilloverData()$success)
+    #   
+    #   # Get font size from app settings
+    #   font_size <- app_state$plot_settings$font_size
+    #   
+    #   tryCatch({
+    #     # Get a sample of data for visualization
+    #     fcs_data <- rawFCS()
+    #     if (!inherits(fcs_data, "flowFrame")) {
+    #       return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+    #                                label = "Compensation comparison only available for FCS files") +
+    #              theme_void())
+    #     }
+    #     
+    #     # Sample data for faster plotting
+    #     n_sample <- min(5000, nrow(fcs_data))
+    #     sample_indices <- sample(nrow(fcs_data), n_sample)
+    #     
+    #     # Get original data
+    #     original_data <- exprs(fcs_data)[sample_indices, ]
+    #     
+    #     # Apply compensation
+    #     comp_result <- applyCompensation(fcs_data, spilloverData()$spillover_matrix)
+    #     compensated_data <- exprs(comp_result$data)[sample_indices, ]
+    #     
+    #     # Get channels that are in the spillover matrix
+    #     common_channels <- intersect(colnames(original_data), colnames(spilloverData()$spillover_matrix))
+    #     
+    #     if (length(common_channels) >= 2) {
+    #       # Create comparison plot for first two channels
+    #       ch1 <- common_channels[1]
+    #       ch2 <- common_channels[2]
+    #       
+    #       # Use the utility function to create the comparison plot
+    #       createCompensationComparisonPlot(original_data, compensated_data, 
+    #                                      ch1, ch2, 
+    #                                      n_sample = n_sample, 
+    #                                      font_size = font_size)
+    #     } else {
+    #       ggplot() + annotate("text", x = 0.5, y = 0.5, 
+    #                          label = "Not enough matching channels for comparison") +
+    #         theme_void()
+    #     }
+    #     
+    #   }, error = function(e) {
+    #     ggplot() + annotate("text", x = 0.5, y = 0.5, 
+    #                        label = paste("Error creating comparison plot:", e$message)) +
+    #       theme_void()
+    #   })
+    # }, width = function() app_state$plot_settings$width,
+    # height = function() app_state$plot_settings$height)
+    
+    # Apply live/dead gating threshold to the main analysis - COMMENTED OUT: Using dedicated gating module
+    # observeEvent(input$applyLiveDeadGating, {
+    #   req(input$liveDeadMarkerSelect, input$liveDeadMarkerSelect != "None")
+    #   
+    #   # Extract correct marker name (remove the description part)
+    #   ld_marker <- input$liveDeadMarkerSelect
+    #   if (grepl(" - ", ld_marker)) {
+    #     ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
+    #   }
+    #   
+    #   # Update liveDeadGate selection
+    #   updateSelectInput(session, "liveDeadGate", selected = ld_marker)
+    #   
+    #   # Update liveDeadThreshold value
+    #   updateNumericInput(session, "liveDeadThreshold", value = input$liveDeadThresholdSlider)
+    #   
+    #   # Make sure gating is enabled
+    #   updateCheckboxInput(session, "performGating", value = TRUE)
+    #   
+    #   # Show notification
+    #   showNotification(
+    #     paste("Live/Dead threshold updated to", input$liveDeadThresholdSlider),
+    #     type = "message", 
+    #     duration = 3
+    #   )
+    # })
+    
+    # ============================================================================
+    # SERVER-SIDE CONDITIONAL UI RENDERING
+    # ============================================================================
+    
+    # # Compensation settings UI
+    # output$compensationSettingsUI <- renderUI({
+    #   if (isTRUE(input$enableCompensation)) {
+    #     tagList(
+    #       div(class = "compensation-panel",
+    #         h5(icon("upload"), "Control Files"),
+    #         
+    #         # Upload multiple control files
+    #         fileInput(session$ns("controlFiles"), "Upload Control Files (FCS only)", 
+    #                   accept = c(".fcs"), multiple = TRUE),
+    #         
+    #         # Upload unstained control file
+    #         fileInput(session$ns("unstainedControlFile"), "Upload Unstained Control File (FCS only)", 
+    #                   accept = c(".fcs"), multiple = FALSE),
+    #         
+    #         # UI for assigning markers to control files
+    #         uiOutput(session$ns("markerAssignmentUI")),
+    #         
+    #         # Button to compute spillover matrix
+    #         actionButton(session$ns("computeSpillover"), "Compute Spillover Matrix", 
+    #                      class = "btn-info btn-block", 
+    #                      icon = icon("calculator"),
+    #                      style = "margin-bottom: 10px;"),
+    #         
+    #         # Display spillover computation status
+    #         verbatimTextOutput(session$ns("spilloverStatus"))
+    #       ),
+    #       
+    #       hr(),
+    #       
+    #       # Option to upload pre-computed spillover matrix
+    #       h5(icon("file-import"), "Import Existing Matrix"),
+    #       fileInput(session$ns("spilloverMatrixFile"), "Upload Pre-computed Spillover Matrix (CSV)", 
+    #                 accept = c(".csv")),
+    #       
+    #       # Display current spillover matrix conditionally
+    #       if (!is.null(spilloverData()) && spilloverData()$success) {
+    #         tagList(
+    #           h5("Current Spillover Matrix:"),
+    #           DT::dataTableOutput(session$ns("spilloverMatrixDisplay"))
+    #         )
+    #       }
+    #     )
+    #   }
+    # })
+    
+    # Dimensionality reduction methods UI
+    output$dimensionalityMethodsUI <- renderUI({
+      methods <- input$methods
+      if (is.null(methods)) return(NULL)
       
-      # Check if unstained control is uploaded
-      if (is.null(input$unstainedControlFile)) {
-        showNotification("Please upload an unstained control file", type = "error")
-        return()
-      }
+      ui_elements <- list()
       
-      # Get marker assignments
-      marker_assignments <- list()
-      control_file_paths <- list()
-      
-      for (i in 1:nrow(input$controlFiles)) {
-        marker_input_id <- paste0("marker_", i)
-        if (!is.null(input[[marker_input_id]]) && input[[marker_input_id]] != "") {
-          file_name <- input$controlFiles$name[i]
-          file_path <- input$controlFiles$datapath[i]
+      # t-SNE parameters
+      if ("t-SNE" %in% methods) {
+        ui_elements[["tsne"]] <- div(class = "method-controls",
+          h6(icon("cog"), "t-SNE Parameters"),
+          numericInput(session$ns("perplexity"), "Perplexity", value = 30, min = 5, max = 50),
+          checkboxInput(session$ns("use_barnes_hut"), "Use Barnes-Hut Approximation (faster)", value = TRUE),
           
-          marker_assignments[[file_name]] <- input[[marker_input_id]]
-          control_file_paths[[file_name]] <- file_path
-        }
-      }
-      
-      if (length(marker_assignments) < 2) {
-        showNotification("Please assign at least 2 control files to markers", type = "error")
-        return()
-      }
-      
-      # Add unstained control
-      unstained_file_path <- input$unstainedControlFile$datapath
-      unstained_file_name <- input$unstainedControlFile$name
-      
-      # Compute spillover matrix
-      withProgress(message = 'Computing spillover matrix...', value = 0, {
-        incProgress(0.5, detail = "Processing control files...")
-        
-        spillover_result <- computeSpilloverMatrix(control_file_paths, marker_assignments, 
-                                                 unstained_file_path, unstained_file_name)
-        
-        incProgress(0.5, detail = "Finalizing matrix...")
-        
-        if (spillover_result$success) {
-          # Store the spillover data
-          spilloverData(spillover_result)
+          # Barnes-Hut theta setting
+          if (isTRUE(input$use_barnes_hut)) {
+            sliderInput(session$ns("tsne_theta"), "Barnes-Hut theta", 
+                        min = 0.0, max = 1.0, value = 0.5, step = 0.1)
+          } else if (isFALSE(input$use_barnes_hut)) {
+            div(class = "alert alert-warning", style = "padding: 8px; margin: 5px 0;",
+                icon("exclamation-triangle"), " Exact t-SNE is very slow for datasets > 1000 cells.")
+          },
           
-          showNotification(spillover_result$message, type = "message", duration = 5)
-        } else {
-          showNotification(spillover_result$message, type = "error", duration = 10)
-        }
-      })
+          numericInput(session$ns("tsne_max_iter"), "Maximum Iterations", value = 1000, min = 100, max = 10000, step = 100)
+        )
+      }
+      
+      # UMAP parameters
+      if ("UMAP" %in% methods) {
+        ui_elements[["umap"]] <- div(class = "method-controls",
+          h6(icon("cog"), "UMAP Parameters"),
+          numericInput(session$ns("n_neighbors"), "n_neighbors", value = 15, min = 2, max = 100)
+        )
+      }
+      
+      # PCA parameters
+      if ("PCA" %in% methods) {
+        ui_elements[["pca"]] <- div(class = "method-controls",
+          h6(icon("cog"), "PCA Parameters"),
+          numericInput(session$ns("pca_components"), "Number of Components", value = 2, min = 2, max = 10)
+        )
+      }
+      
+      # MDS parameters
+      if ("MDS" %in% methods) {
+        ui_elements[["mds"]] <- div(class = "method-controls",
+          h6(icon("cog"), "MDS Parameters"),
+          p("MDS uses Euclidean distances by default."),
+          tags$small("Note: MDS can be slow for large datasets.")
+        )
+      }
+      
+      do.call(tagList, ui_elements)
     })
     
-    # Handle pre-computed spillover matrix upload
-    observeEvent(input$spilloverMatrixFile, {
-      req(input$spilloverMatrixFile)
+    # QC settings UI
+    output$qcSettingsUI <- renderUI({
+      if (isTRUE(input$performQC)) {
+        numericInput(session$ns("maxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
+      }
+    })
+    
+    # Gating settings UI - COMMENTED OUT: Using dedicated gating module now
+    # output$gatingSettingsUI <- renderUI({
+    #   if (isTRUE(input$performGating)) {
+    #     tagList(
+    #       textInput(session$ns("debrisGate"), "FSC/SSC Parameters (comma-separated)", 
+    #                 value = "FSC-A,SSC-A"),
+    #       selectInput(session$ns("liveDeadGate"), "Live/Dead Parameter", 
+    #                   choices = c("None", "Live Dead BV570 Violet-610-A"),
+    #                   selected = "None"),
+    #       
+    #       # Live/dead threshold parameter
+    #       if (!is.null(input$liveDeadGate) && input$liveDeadGate != "None") {
+    #         tagList(
+    #           numericInput(session$ns("liveDeadThreshold"), "Live/Dead Threshold", 
+    #                        value = 1000, min = 0, max = 10000, step = 100),
+    #           helpText("Cells with values below this threshold will be considered live")
+    #         )
+    #       }
+    #     )
+    #   }
+    # })
+    
+    # Heatmap bins UI
+    output$heatmapBinsUI <- renderUI({
+      if (!is.null(input$heatmapMethod) && input$heatmapMethod == "hex") {
+        numericInput(session$ns("heatmapBins"), "Number of Bins:", 
+                     value = 50, min = 10, max = 100, step = 5)
+      }
+    })
+    
+    # Marker mapping summary UI
+    output$markerMappingSummary <- renderUI({
+      mappings <- markerNameMappings()
+      if (length(mappings) == 0) {
+        return(div(style = "color: #6c757d; font-style: italic; text-align: center; padding: 5px;",
+                   "No markers renamed yet"))
+      }
       
-      tryCatch({
-        # Read CSV file
-        spillover_matrix <- read.csv(input$spilloverMatrixFile$datapath, row.names = 1)
-        spillover_matrix <- as.matrix(spillover_matrix)
-        
-        # Validate the matrix
-        if (!is.null(rawFCS()) && inherits(rawFCS(), "flowFrame")) {
-          validation_result <- validateSpilloverMatrix(spillover_matrix, colnames(exprs(rawFCS())))
-          
-          if (validation_result$valid) {
-            # Store the spillover data
-            spilloverData(list(
-              spillover_matrix = spillover_matrix,
-              success = TRUE,
-              message = paste("Pre-computed spillover matrix loaded:", validation_result$message)
-            ))
-            
-            showNotification("Spillover matrix loaded successfully", type = "message")
+      # Create a compact summary of mappings
+      mapping_text <- paste(
+        sapply(names(mappings), function(tech) {
+          display <- mappings[[tech]]
+          if (tech != display) {
+            paste0(tech, " → ", display)
           } else {
-            showNotification(validation_result$message, type = "error")
+            NULL
           }
-        } else {
-          # Store without validation if no main data loaded yet
-          spilloverData(list(
-            spillover_matrix = spillover_matrix,
-            success = TRUE,
-            message = "Pre-computed spillover matrix loaded (not yet validated)"
-          ))
-          
-          showNotification("Spillover matrix loaded (will be validated when main data is loaded)", type = "message")
-        }
-        
-      }, error = function(e) {
-        showNotification(paste("Error loading spillover matrix:", e$message), type = "error")
-      })
-    })
-    
-    # Display spillover status
-    output$spilloverStatus <- renderText({
-      if (!is.null(spilloverData())) {
-        spilloverData()$message
-      } else {
-        "No spillover matrix computed or loaded yet."
-      }
-    })
-    
-    # Display spillover matrix in sidebar
-    output$spilloverMatrixDisplay <- DT::renderDataTable({
-      req(spilloverData(), spilloverData()$success)
+        }),
+        collapse = "\n"
+      )
       
-      DT::datatable(
-        round(spilloverData()$spillover_matrix, 4),
-        options = list(scrollX = TRUE, pageLength = 10)
+      if (mapping_text == "") {
+        return(div(style = "color: #6c757d; font-style: italic; text-align: center; padding: 5px;",
+                   "No markers renamed yet"))
+      }
+      
+      div(
+        style = "background-color: #f8f9fa; padding: 8px; border-radius: 4px; border: 1px solid #dee2e6; font-size: 0.85em;",
+        h6("Current Mappings:", style = "margin-bottom: 5px; color: #495057;"),
+        pre(mapping_text, style = "margin: 0; white-space: pre-wrap; color: #495057;")
       )
     })
     
-    # Display spillover matrix in main panel
-    output$spilloverMatrixTable <- DT::renderDataTable({
-      req(spilloverData(), spilloverData()$success)
+    # Show marker renaming modal
+    observeEvent(input$showMarkerRenaming, {
+      req(processedData())
+      markers <- processedData()$markers
+      current_mappings <- markerNameMappings()
       
-      DT::datatable(
-        round(spilloverData()$spillover_matrix, 4),
-        options = list(scrollX = TRUE, pageLength = 15),
-        caption = "Spillover Matrix (values represent spillover from column to row)"
-      ) %>% formatRound(columns = 1:ncol(spilloverData()$spillover_matrix), digits = 4)
+      # Create input fields for each marker
+      marker_inputs <- lapply(seq_along(markers), function(i) {
+        marker <- markers[i]
+        current_display <- getMarkerDisplayName(marker, current_mappings)
+        
+        div(
+          style = "margin-bottom: 10px; padding: 10px; border: 1px solid #dee2e6; border-radius: 4px; background-color: #f8f9fa;",
+          fluidRow(
+            column(5,
+              strong("Technical Name:"),
+              br(),
+              code(marker, style = "background-color: #e9ecef; padding: 2px 4px; border-radius: 3px;")
+            ),
+            column(7,
+              textInput(
+                inputId = session$ns(paste0("marker_display_", i)),
+                label = "Display Name:",
+                value = current_display,
+                placeholder = "Enter friendly name..."
+              )
+            )
+          )
+        )
+      })
+      
+      showModal(modalDialog(
+        title = div(icon("edit"), " Rename Markers"),
+        size = "l",
+        
+        div(
+          class = "alert alert-info",
+          style = "margin-bottom: 15px;",
+          icon("info-circle"),
+          strong(" Instructions: "),
+          "Enter friendly names for your markers. Leave blank to use the technical name. ",
+          "Examples: FL1-A → CD3, FL2-A → CD4, FJComp-FL1-A → CD8, etc."
+        ),
+        
+        div(
+          style = "max-height: 400px; overflow-y: auto; padding: 5px;",
+          do.call(tagList, marker_inputs)
+        ),
+        
+        footer = tagList(
+          actionButton(session$ns("resetMarkerNames"), "Reset All", 
+                      class = "btn-warning", icon = icon("undo")),
+          downloadButton(session$ns("downloadMarkerMappings"), "Export Mappings", 
+                        class = "btn-secondary", icon = icon("download")),
+          fileInput(session$ns("uploadMarkerMappings"), NULL, 
+                   buttonLabel = "Import Mappings", 
+                   accept = c(".csv"),
+                   placeholder = "CSV file"),
+          modalButton("Cancel"),
+          actionButton(session$ns("saveMarkerNames"), "Save Changes", 
+                      class = "btn-success", icon = icon("save"))
+        )
+      ))
     })
     
-    # Plot compensation effects
-    output$compensationEffectsPlot <- renderPlot({
-      req(spilloverData(), spilloverData()$success)
+    # Save marker name mappings
+    observeEvent(input$saveMarkerNames, {
+      req(processedData())
+      markers <- processedData()$markers
       
-      # Get font size from app settings
-      font_size <- app_state$plot_settings$font_size
+      # Collect all the new names
+      new_mappings <- list()
+      for (i in seq_along(markers)) {
+        marker <- markers[i]
+        input_id <- paste0("marker_display_", i)
+        new_name <- input[[input_id]]
+        
+        if (!is.null(new_name) && trimws(new_name) != "") {
+          new_mappings[[marker]] <- trimws(new_name)
+        } else {
+          new_mappings[[marker]] <- marker  # Use technical name if no display name
+        }
+      }
       
-      spillover_matrix <- spilloverData()$spillover_matrix
+      # Update the mappings
+      markerNameMappings(new_mappings)
       
-      # Use the utility function to create the heatmap
-      createSpilloverHeatmap(spillover_matrix, 
-                            title = "Spillover Matrix Heatmap", 
-                            font_size = font_size)
-    }, width = function() app_state$plot_settings$width,
-    height = function() app_state$plot_settings$height)
+      removeModal()
+      showNotification("Marker names updated successfully!", type = "message", duration = 3)
+    })
     
-    # Plot before vs after compensation comparison
-    output$beforeAfterCompensationPlot <- renderPlot({
-      req(rawFCS(), spilloverData(), spilloverData()$success)
-      
-      # Get font size from app settings
-      font_size <- app_state$plot_settings$font_size
+    # Reset marker names
+    observeEvent(input$resetMarkerNames, {
+      markerNameMappings(list())
+      removeModal()
+      showNotification("All marker names reset to technical names", type = "message", duration = 3)
+    })
+    
+    # Download marker mappings
+    output$downloadMarkerMappings <- downloadHandler(
+      filename = function() {
+        paste0("marker_mappings_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+      },
+      content = function(file) {
+        mappings <- markerNameMappings()
+        if (length(mappings) == 0) {
+          # Create empty file with headers
+          mapping_df <- data.frame(
+            TechnicalName = character(0),
+            DisplayName = character(0),
+            stringsAsFactors = FALSE
+          )
+        } else {
+          # Create data frame from mappings
+          mapping_df <- data.frame(
+            TechnicalName = names(mappings),
+            DisplayName = unlist(mappings),
+            stringsAsFactors = FALSE
+          )
+        }
+        write.csv(mapping_df, file, row.names = FALSE)
+      }
+    )
+    
+    # Upload marker mappings
+    observeEvent(input$uploadMarkerMappings, {
+      req(input$uploadMarkerMappings)
       
       tryCatch({
-        # Get a sample of data for visualization
-        fcs_data <- rawFCS()
-        if (!inherits(fcs_data, "flowFrame")) {
-          return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                   label = "Compensation comparison only available for FCS files") +
-                 theme_void())
+        # Read the CSV file
+        mapping_df <- read.csv(input$uploadMarkerMappings$datapath, stringsAsFactors = FALSE)
+        
+        # Validate the CSV structure
+        if (!all(c("TechnicalName", "DisplayName") %in% colnames(mapping_df))) {
+          showNotification("CSV file must have 'TechnicalName' and 'DisplayName' columns", 
+                          type = "error", duration = 5)
+          return()
         }
         
-        # Sample data for faster plotting
-        n_sample <- min(5000, nrow(fcs_data))
-        sample_indices <- sample(nrow(fcs_data), n_sample)
+        # Convert to list format
+        new_mappings <- setNames(
+          as.list(mapping_df$DisplayName),
+          mapping_df$TechnicalName
+        )
         
-        # Get original data
-        original_data <- exprs(fcs_data)[sample_indices, ]
+        # Update the mappings
+        markerNameMappings(new_mappings)
         
-        # Apply compensation
-        comp_result <- applyCompensation(fcs_data, spilloverData()$spillover_matrix)
-        compensated_data <- exprs(comp_result$data)[sample_indices, ]
-        
-        # Get channels that are in the spillover matrix
-        common_channels <- intersect(colnames(original_data), colnames(spilloverData()$spillover_matrix))
-        
-        if (length(common_channels) >= 2) {
-          # Create comparison plot for first two channels
-          ch1 <- common_channels[1]
-          ch2 <- common_channels[2]
-          
-          # Use the utility function to create the comparison plot
-          createCompensationComparisonPlot(original_data, compensated_data, 
-                                         ch1, ch2, 
-                                         n_sample = n_sample, 
-                                         font_size = font_size)
-        } else {
-          ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                             label = "Not enough matching channels for comparison") +
-            theme_void()
-        }
+      showNotification(
+          paste("Successfully imported", nrow(mapping_df), "marker mappings"), 
+          type = "message", duration = 3
+        )
         
       }, error = function(e) {
-        ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                           label = paste("Error creating comparison plot:", e$message)) +
-          theme_void()
+        showNotification(
+          paste("Error reading mappings file:", e$message), 
+          type = "error", duration = 5
+        )
       })
-    }, width = function() app_state$plot_settings$width,
-    height = function() app_state$plot_settings$height)
-    
-    # Apply live/dead gating threshold to the main analysis
-    observeEvent(input$applyLiveDeadGating, {
-      req(input$liveDeadMarkerSelect, input$liveDeadMarkerSelect != "None")
-      
-      # Extract correct marker name (remove the description part)
-      ld_marker <- input$liveDeadMarkerSelect
-      if (grepl(" - ", ld_marker)) {
-        ld_marker <- strsplit(ld_marker, " - ")[[1]][1]
-      }
-      
-      # Update liveDeadGate selection
-      updateSelectInput(session, "liveDeadGate", selected = ld_marker)
-      
-      # Update liveDeadThreshold value
-      updateNumericInput(session, "liveDeadThreshold", value = input$liveDeadThresholdSlider)
-      
-      # Make sure gating is enabled
-      updateCheckboxInput(session, "performGating", value = TRUE)
-      
-      # Show notification
-      showNotification(
-        paste("Live/Dead threshold updated to", input$liveDeadThresholdSlider),
-        type = "message", 
-        duration = 3
-      )
     })
+    
+    # # Compensation analysis UI
+    # output$compensationAnalysisUI <- renderUI({
+    #   if (isTRUE(input$enableCompensation)) {
+    #     tagList(
+    #       fluidRow(
+    #         column(6,
+    #                shinydashboard::box(
+    #                  title = "Spillover Matrix", status = "info", solidHeader = TRUE,
+    #                  width = 12,
+    #                  DT::dataTableOutput(session$ns("spilloverMatrixTable"))
+    #                )
+    #         ),
+    #         column(6,
+    #                shinydashboard::box(
+    #                  title = "Compensation Effects", status = "success", solidHeader = TRUE,
+    #                  width = 12,
+    #                  plotOutput(session$ns("compensationEffectsPlot"), height = "400px")
+    #                )
+    #         )
+    #       ),
+    #       shinydashboard::box(
+    #         title = "Before vs After Compensation", status = "primary", solidHeader = TRUE,
+    #         width = 12,
+    #         plotOutput(session$ns("beforeAfterCompensationPlot"), height = "500px")
+    #       )
+    #     )
+    #   } else {
+    #     div(class = "alert alert-info", style = "margin: 15px;",
+    #         icon("info-circle"), 
+    #         h5("Spillover Compensation Disabled"),
+    #         p("Enable spillover compensation in the sidebar to view compensation analysis.")
+    #     )
+    #   }
+    # })
+    
+    # Live/Dead controls UI
+    output$liveDeadControlsUI <- renderUI({
+      if (!is.null(input$liveDeadMarkerSelect) && input$liveDeadMarkerSelect != "None") {
+        tagList(
+          sliderInput(session$ns("liveDeadThresholdSlider"), "Threshold", 
+                      min = 0, max = 5000, value = 1000, step = 100),
+          checkboxInput(session$ns("useLogScale"), "Use Log Scale for Visualization", value = TRUE)
+          # hr(),
+          # h5("Gating Results"),  # COMMENTED OUT: Using dedicated gating module
+          # verbatimTextOutput(session$ns("liveDeadStats")),
+          # actionButton(session$ns("applyLiveDeadGating"), "Apply to Preprocessing", 
+          #              class = "btn-primary", style = "width: 100%;")
+        )
+      }
+    })
+    
+    # Live/Dead scatter UI
+    output$liveDeadScatterUI <- renderUI({
+      if (!is.null(input$liveDeadMarkerSelect) && input$liveDeadMarkerSelect != "None") {
+        shinydashboard::box(
+          title = "2D Live/Dead Visualization", status = "success", solidHeader = TRUE,
+          width = 12,
+          plotOutput(session$ns("liveDeadScatter"), height = "400px")
+        )
+      }
+    })
+    
+    # Cluster analysis UI
+    output$clusterAnalysisUI <- renderUI({
+      if (!is.null(input[["clustering-showClusteringOptions"]]) && input[["clustering-showClusteringOptions"]]) {
+        tabsetPanel(
+          tabPanel("Cluster Visualization", 
+                   br(),
+                   div(style = "position: relative;",
+                       plotlyOutput(session$ns("clusterPlot"), height = "600px"))
+          ),
+          tabPanel("Cluster Profiles", 
+                   br(),
+                   shinycssloaders::withSpinner(plotOutput(session$ns("clusterHeatmap")))),
+          tabPanel("Cluster Statistics", 
+                   br(),
+                   DT::dataTableOutput(session$ns("clusterStats"))),
+          tabPanel("Identified Populations", 
+                   br(),
+                   DT::dataTableOutput(session$ns("populationTable")))
+        )
+      } else {
+        div(class = "alert alert-info", style = "margin: 15px;",
+            icon("info-circle"), 
+            h5("Clustering Analysis Disabled"),
+            p("Enable clustering analysis in the sidebar to view cluster results.")
+        )
+      }
+    })
+    
+    # ============================================================================
+    # END OF SERVER-SIDE CONDITIONAL UI RENDERING
+    # ============================================================================
     
     # Run analysis when button is clicked
     observeEvent(input$run, {
@@ -1200,13 +1555,16 @@ rawDataModuleServer <- function(id, app_state) {
           cofactor = input$cofactor,
           n_events = input$nEvents,
           perform_qc = isTRUE(input$performQC),
-          perform_gating = isTRUE(input$performGating),
-          perform_compensation = isTRUE(input$enableCompensation),
-          spillover_matrix = if (isTRUE(input$enableCompensation) && !is.null(spilloverData()) && spilloverData()$success) {
-            spilloverData()$spillover_matrix
-          } else {
-            NULL
-          },
+          # perform_gating = isTRUE(input$performGating),  # COMMENTED OUT: Using dedicated gating module
+          perform_gating = FALSE,  # Disabled - using dedicated gating module
+          # perform_compensation = isTRUE(input$enableCompensation),
+          perform_compensation = FALSE,  # COMMENTED OUT: Using dedicated compensation module
+          # spillover_matrix = if (isTRUE(input$enableCompensation) && !is.null(spilloverData()) && spilloverData()$success) {
+          #   spilloverData()$spillover_matrix
+          # } else {
+          #   NULL
+          # },
+          spillover_matrix = NULL,  # COMMENTED OUT: Using dedicated compensation module
           scale_data = TRUE,
           seed = 123
         )
@@ -1218,30 +1576,30 @@ rawDataModuleServer <- function(id, app_state) {
           )
         }
         
-        # Add gating parameters if gating is enabled
-        if (isTRUE(input$performGating)) {
-          # Parse debris gate parameters from comma-separated string
-          debris_gate_params <- unlist(strsplit(input$debrisGate, ",\\s*"))
-          
-          preprocessing_params$gates <- list(
-            debris_gate = if (length(debris_gate_params) >= 2) debris_gate_params[1:2] else NULL,
-            live_dead_gate = if (!is.null(input$liveDeadGate) && input$liveDeadGate != "None") input$liveDeadGate else NULL
-          )
-          
-          # Add threshold for live/dead gating if available
-          if (!is.null(input$liveDeadThreshold) && input$liveDeadGate != "None") {
-            # We need to modify the gating function to use this threshold
-            # For now, we'll display a notification about it
-            showNotification(
-              paste("Using live/dead threshold of", input$liveDeadThreshold),
-              type = "message", 
-              duration = 3
-            )
-            
-            # In a full implementation, we'd need to update the performGating function
-            # to use this custom threshold instead of the hardcoded 1000 value
-          }
-        }
+        # Add gating parameters if gating is enabled - COMMENTED OUT: Using dedicated gating module
+        # if (isTRUE(input$performGating)) {
+        #   # Parse debris gate parameters from comma-separated string
+        #   debris_gate_params <- unlist(strsplit(input$debrisGate, ",\\s*"))
+        #   
+        #   preprocessing_params$gates <- list(
+        #     debris_gate = if (length(debris_gate_params) >= 2) debris_gate_params[1:2] else NULL,
+        #     live_dead_gate = if (!is.null(input$liveDeadGate) && input$liveDeadGate != "None") input$liveDeadGate else NULL
+        #   )
+        #   
+        #   # Add threshold for live/dead gating if available
+        #   if (!is.null(input$liveDeadThreshold) && input$liveDeadGate != "None") {
+        #     # We need to modify the gating function to use this threshold
+        #     # For now, we'll display a notification about it
+        #     showNotification(
+        #       paste("Using live/dead threshold of", input$liveDeadThreshold),
+        #       type = "message", 
+        #       duration = 3
+        #     )
+        #     
+        #     # In a full implementation, we'd need to update the performGating function
+        #     # to use this custom threshold instead of the hardcoded 1000 value
+        #   }
+        # }
         
         # Run preprocessing pipeline
         incProgress(0.1, detail = "Preprocessing data...")
@@ -1367,13 +1725,13 @@ rawDataModuleServer <- function(id, app_state) {
         # Display notification about preprocessing results
         if (!is.null(results$metrics)) {
           qc_removed <- round(results$metrics$qc$removed_pct * 100, 1)
-          gating_removed <- round(results$metrics$gating$removed_pct * 100, 1)
-          compensation_applied <- results$metrics$compensation$applied
+          # gating_removed <- round(results$metrics$gating$removed_pct * 100, 1)  # COMMENTED OUT: Using dedicated gating module
+          # compensation_applied <- results$metrics$compensation$applied  # COMMENTED OUT: Using dedicated compensation module
           
           msg <- paste0("Preprocessing complete: ", 
-                        if (compensation_applied) "Compensation applied, " else "",
-                        qc_removed, "% removed in QC, ",
-                        gating_removed, "% removed in gating. ",
+                        # if (compensation_applied) "Compensation applied, " else "",  # COMMENTED OUT: Using dedicated compensation module
+                        qc_removed, "% removed in QC. ",
+                        # gating_removed, "% removed in gating. ",  # COMMENTED OUT: Using dedicated gating module
                         "Analyzing ", nrow(results$sampled_data), " cells.")
           
           showNotification(msg, type = "message", duration = 5)
@@ -1621,22 +1979,22 @@ rawDataModuleServer <- function(id, app_state) {
           metrics_ui,
           hr(),
           h4("Preprocessing Metrics"),
-          div(
-            h5("Compensation:"),
-            p(paste("Applied:", results$metrics$compensation$applied)),
-            p(paste("Status:", results$metrics$compensation$message))
-          ),
+          # div(
+          #   h5("Compensation:"),
+          #   p(paste("Applied:", results$metrics$compensation$applied)),
+          #   p(paste("Status:", results$metrics$compensation$message))
+          # ),
           div(
             h5("Quality Control:"),
             p(paste("Initial cells:", results$metrics$qc$initial_count)),
             p(paste("After QC:", results$metrics$qc$final_count)),
             p(paste("Removed:", round(results$metrics$qc$removed_pct * 100, 1), "%"))
           ),
-          div(
-            h5("Gating:"),
-            p(paste("After gating:", results$metrics$gating$final_count)),
-            p(paste("Removed in gating:", round(results$metrics$gating$removed_pct * 100, 1), "%"))
-          ),
+          # div(  # COMMENTED OUT: Using dedicated gating module
+          #   h5("Gating:"),
+          #   p(paste("After gating:", results$metrics$gating$final_count)),
+          #   p(paste("Removed in gating:", round(results$metrics$gating$removed_pct * 100, 1), "%"))
+          # ),
           div(
             h5("Sampling:"),
             p(paste("Final analyzed cells:", nrow(results$sampled_data)))
@@ -1656,7 +2014,7 @@ rawDataModuleServer <- function(id, app_state) {
       session$sendCustomMessage(type = "refreshClusterPlot", message = list())
     })
     
-    # NEW: Make t-SNE and UMAP plots reactive to plot settings changes
+    # Make t-SNE and UMAP plots reactive to plot settings changes
     observe({
       # This observer will re-run whenever plot settings change
       app_state$plot_settings
@@ -2131,6 +2489,654 @@ rawDataModuleServer <- function(id, app_state) {
       
       return(p_plotly)
     })
+    
+    # ============================================================================
+    # MARKER EXPRESSION HEATMAP FUNCTIONALITY
+    # ============================================================================
+    
+    # Update marker choices when data changes
+    observe({
+      req(processedData())
+      markers <- processedData()$markers
+      
+      # Get marker choices with display names
+      marker_choices <- getMarkerChoicesWithDisplayNames(markers, markerNameMappings())
+      
+      updateSelectInput(session, "heatmapMarker", 
+                       choices = marker_choices, selected = if(length(markers) > 0) markers[1] else NULL)
+    })
+    
+    # Update marker choices when mappings change
+    observe({
+      req(processedData())
+      markerNameMappings()  # This dependency ensures the observer runs when mappings change
+      
+      markers <- processedData()$markers
+      current_selection <- input$heatmapMarker
+      
+      # Get marker choices with updated display names
+      marker_choices <- getMarkerChoicesWithDisplayNames(markers, markerNameMappings())
+      
+      updateSelectInput(session, "heatmapMarker", 
+                       choices = marker_choices, selected = current_selection)
+    })
+    
+    # Update dimensionality method choices
+    observe({
+      req(processedData())
+      plot_data <- processedData()$plot_data
+      available_methods <- getAvailableDimMethods(plot_data)
+      
+      updateSelectInput(session, "heatmapDimMethod",
+                       choices = names(available_methods),
+                       selected = if(length(available_methods) > 0) names(available_methods)[1] else NULL)
+    })
+    
+    # Render individual marker heatmap
+    output$markerHeatmapPlot <- renderPlotly({
+      req(processedData(), input$heatmapMarker, input$heatmapDimMethod)
+      
+      plot_data <- processedData()$plot_data
+      available_methods <- getAvailableDimMethods(plot_data)
+      
+      if (!input$heatmapDimMethod %in% names(available_methods)) return(NULL)
+      
+      dim_coords <- available_methods[[input$heatmapDimMethod]]
+      dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
+      
+      # Optimize data for rendering
+      opt_data <- optimizeHeatmapRendering(plot_data)
+      
+      bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 50
+      
+      p <- createMarkerExpressionHeatmap(
+        plot_data = opt_data,
+        marker = input$heatmapMarker,
+        dim1 = dim_coords[1],
+        dim2 = dim_coords[2],
+        method = input$heatmapMethod,
+        bins = bins_value,
+        title = paste(input$heatmapMarker, "Expression on", input$heatmapDimMethod),
+        font_size = app_state$plot_settings$font_size,
+        color_palette = input$heatmapColorPalette
+      )
+      
+      # Customize axis labels
+      p <- p + labs(x = dim_labels[1], y = dim_labels[2])
+      
+      p_plotly <- ggplotly(p, width = app_state$plot_settings$width, 
+                          height = app_state$plot_settings$height)
+      
+      # Apply font settings
+      p_plotly <- p_plotly %>% layout(
+        title = list(
+          text = paste(input$heatmapMarker, "Expression on", input$heatmapDimMethod),
+          font = list(
+            family = "Arial",
+            size = app_state$plot_settings$font_size * 1.2,
+            color = "black"
+          )
+        ),
+        xaxis = list(
+          title = list(
+            text = dim_labels[1],
+            font = list(
+              family = "Arial",
+              size = app_state$plot_settings$font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = app_state$plot_settings$font_size
+          )
+        ),
+        yaxis = list(
+          title = list(
+            text = dim_labels[2],
+            font = list(
+              family = "Arial",
+              size = app_state$plot_settings$font_size * 1.1,
+              color = "black"
+            )
+          ),
+          tickfont = list(
+            family = "Arial",
+            size = app_state$plot_settings$font_size
+          )
+        ),
+        hoverlabel = list(
+          bgcolor = "white",
+          font = list(
+            family = "Arial",
+            size = app_state$plot_settings$font_size * 0.9
+          )
+        )
+      )
+      
+      return(p_plotly)
+    })
+    
+    # Render static marker heatmap with scaling support
+    output$markerHeatmapPlotStatic <- renderPlot({
+      req(processedData(), input$heatmapMarker, input$heatmapDimMethod)
+      
+      plot_data <- processedData()$plot_data
+      available_methods <- getAvailableDimMethods(plot_data)
+      
+      if (!input$heatmapDimMethod %in% names(available_methods)) return(NULL)
+      
+      dim_coords <- available_methods[[input$heatmapDimMethod]]
+      dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
+      
+      # Optimize data for rendering
+      opt_data <- optimizeHeatmapRendering(plot_data)
+      
+      bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 50
+      
+      # Get display name for the marker
+      marker_display_name <- getMarkerDisplayName(input$heatmapMarker, markerNameMappings())
+      
+      p <- createMarkerExpressionHeatmap(
+        plot_data = opt_data,
+        marker = input$heatmapMarker,
+        dim1 = dim_coords[1],
+        dim2 = dim_coords[2],
+        method = input$heatmapMethod,
+        bins = bins_value,
+        title = paste(marker_display_name, "Expression on", input$heatmapDimMethod),
+        font_size = app_state$plot_settings$font_size,
+        color_palette = input$heatmapColorPalette
+      )
+      
+      # Customize axis labels
+      p + labs(x = dim_labels[1], y = dim_labels[2])
+      
+    }, width = function() app_state$plot_settings$width,
+       height = function() app_state$plot_settings$height)
+    
+    # Store analysis results for smart features
+    smart_analysis_results <- reactiveVal(NULL)
+    
+    # Track heatmap display mode
+    heatmap_display_mode <- reactiveVal("individual")  # "individual" or "grid"
+    
+    # Run smart analysis when button is clicked
+    observeEvent(input$runSmartAnalysis, {
+      req(processedData(), input$heatmapDimMethod)
+      
+      withProgress(message = 'Running smart analysis...', value = 0, {
+        
+        plot_data <- processedData()$plot_data
+        markers <- processedData()$markers
+        available_methods <- getAvailableDimMethods(plot_data)
+        
+        if (!input$heatmapDimMethod %in% names(available_methods)) {
+          showNotification("Selected dimensionality method not available", type = "error")
+          return()
+        }
+        
+        # Run comprehensive analysis
+        incProgress(0.3, detail = "Analyzing expression hotspots...")
+        
+        analysis_results <- runComprehensiveAnalysis(
+          plot_data = plot_data,
+          markers = markers,
+          dim_methods = list(selected = available_methods[[input$heatmapDimMethod]]),
+          hotspot_threshold = input$hotspotThreshold / 100,
+          population_threshold_high = 0.75,
+          population_threshold_low = 0.25
+        )
+        
+        incProgress(0.7, detail = "Generating population suggestions...")
+        
+        # Store results
+        smart_analysis_results(analysis_results)
+        
+        # Update global app state with suggestions if enabled
+        if (input$enablePopulationSuggestions && !is.null(analysis_results$selected$populations)) {
+          suggested_populations <- convertSuggestionsToPopulations(analysis_results$selected$populations)
+          app_state$cell_identification$suggested_populations <- suggested_populations
+          
+          incProgress(1.0, detail = "Analysis complete!")
+          
+          showNotification(
+            paste("Found", length(analysis_results$selected$populations), "population suggestions and",
+                  analysis_results$selected$summary$markers_with_hotspots, "markers with hotspots!"),
+            type = "message", duration = 5
+          )
+        } else {
+          incProgress(1.0, detail = "Analysis complete!")
+          
+          showNotification(
+            paste("Analysis complete:", analysis_results$selected$summary$markers_with_hotspots, 
+                  "markers with expression hotspots detected"),
+            type = "message", duration = 5
+          )
+        }
+      })
+    })
+    
+    # Render smart analysis results
+    output$smartAnalysisResults <- renderUI({
+      req(smart_analysis_results())
+      
+      results <- smart_analysis_results()$selected
+      
+      if (is.null(results)) {
+        return(div(class = "alert alert-info", "Run smart analysis to see results here."))
+      }
+      
+      # Create summary cards
+      summary_cards <- fluidRow(
+        column(3,
+          div(class = "info-box",
+              style = "background-color: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center;",
+              h4(results$summary$total_markers, style = "margin: 0; color: #1976d2;"),
+              p("Total Markers", style = "margin: 0; font-weight: bold;")
+          )
+        ),
+        column(3,
+          div(class = "info-box",
+              style = "background-color: #f3e5f5; padding: 15px; border-radius: 8px; text-align: center;",
+              h4(results$summary$markers_with_hotspots, style = "margin: 0; color: #7b1fa2;"),
+              p("Markers with Hotspots", style = "margin: 0; font-weight: bold;")
+          )
+        ),
+        column(3,
+          div(class = "info-box",
+              style = "background-color: #e8f5e8; padding: 15px; border-radius: 8px; text-align: center;",
+              h4(results$summary$total_populations, style = "margin: 0; color: #388e3c;"),
+              p("Population Suggestions", style = "margin: 0; font-weight: bold;")
+          )
+        ),
+        column(3,
+          div(class = "info-box",
+              style = "background-color: #fff3e0; padding: 15px; border-radius: 8px; text-align: center;",
+              h4(input$heatmapDimMethod, style = "margin: 0; color: #f57c00;"),
+              p("Analysis Method", style = "margin: 0; font-weight: bold;")
+          )
+        )
+      )
+      
+      # Create detailed results
+      detailed_results <- tagList()
+      
+      # Hotspot detection results
+      if (input$enableHotspotDetection) {
+        hotspot_summary <- div(
+          h6(icon("fire"), "Expression Hotspots by Marker"),
+          DT::dataTableOutput(session$ns("hotspotSummaryTable"))
+        )
+        detailed_results <- tagAppendChild(detailed_results, hotspot_summary)
+      }
+      
+      # Population suggestions
+      if (input$enablePopulationSuggestions) {
+        population_summary <- div(
+          h6(icon("users"), "Population Suggestions"),
+          DT::dataTableOutput(session$ns("populationSuggestionsTable"))
+        )
+        detailed_results <- tagAppendChild(detailed_results, population_summary)
+      }
+      
+      return(tagList(
+        summary_cards,
+        br(),
+        detailed_results
+      ))
+    })
+    
+    # Render hotspot summary table
+    output$hotspotSummaryTable <- DT::renderDataTable({
+      req(smart_analysis_results(), input$enableHotspotDetection)
+      
+      results <- smart_analysis_results()$selected$markers
+      
+      # Create summary table
+      hotspot_data <- data.frame(
+        Marker = names(results),
+        NumHotspots = sapply(results, function(x) x$num_hotspots),
+        HighExpressionPercent = round(sapply(results, function(x) x$high_expression_percent), 1),
+        Threshold = round(sapply(results, function(x) x$threshold), 3),
+        Message = sapply(results, function(x) x$message),
+        stringsAsFactors = FALSE
+      )
+      
+      DT::datatable(
+        hotspot_data,
+        options = list(
+          pageLength = 10,
+          scrollX = TRUE,
+          dom = 't'
+        ),
+        caption = "Expression hotspot detection results"
+      )
+    })
+    
+    # Render population suggestions table
+    output$populationSuggestionsTable <- DT::renderDataTable({
+      req(smart_analysis_results(), input$enablePopulationSuggestions)
+      
+      results <- smart_analysis_results()$selected
+      population_table <- createPopulationSummaryTable(list(selected = results), "selected")
+      
+      if (nrow(population_table) == 0 || "Message" %in% colnames(population_table)) {
+        return(DT::datatable(
+          data.frame(Message = "No population suggestions found"),
+          options = list(dom = 't')
+        ))
+      }
+      
+      DT::datatable(
+        population_table,
+        options = list(
+          pageLength = 10,
+          scrollX = TRUE,
+          dom = 't'
+        ),
+        caption = "Automatically suggested cell populations"
+      ) %>%
+        DT::formatRound(columns = c("Percentage", "Confidence"), digits = 1)
+    })
+    
+
+    
+    # Ultra-fast grid view button handler
+    observeEvent(input$generateAllHeatmapsFast, {
+      req(processedData(), input$heatmapDimMethod)
+      heatmap_display_mode("grid")
+      
+      showNotification("Switched to fast grid view", type = "message", duration = 3)
+    })
+    
+    # Switch back to individual view when marker selection changes
+    observeEvent(input$heatmapMarker, {
+      if (heatmap_display_mode() == "grid") {
+        heatmap_display_mode("individual")
+      }
+    })
+    
+    # Dynamic main display area
+    output$heatmapMainDisplay <- renderUI({
+      if (heatmap_display_mode() == "grid") {
+        # Ultra-fast grid view
+        tagList(
+          div(class = "alert alert-success", style = "margin-bottom: 10px;",
+              icon("lightning-bolt"), " Fast Grid Mode: All markers rendered simultaneously"),
+          
+          # Back to individual button
+          actionButton(session$ns("backToIndividual"), "← Back to Individual View", 
+                      class = "btn-secondary btn-sm", style = "margin-bottom: 15px;"),
+          
+          # Ultra-fast grid
+          shinycssloaders::withSpinner(
+            uiOutput(session$ns("ultraFastGrid"))
+          )
+        )
+      } else {
+        # Individual heatmap view - STATIC ONLY
+        tagList(
+          # Static plot output only
+          shinycssloaders::withSpinner(
+            plotOutput(session$ns("markerHeatmapPlotStatic"), height = "600px")
+          )
+        )
+      }
+    })
+    
+    # Back to individual view button handler
+    observeEvent(input$backToIndividual, {
+      heatmap_display_mode("individual")
+    })
+    
+    # Ultra-fast grid rendering
+    output$ultraFastGrid <- renderUI({
+      req(processedData(), input$heatmapDimMethod, heatmap_display_mode() == "grid")
+      
+      markers <- processedData()$markers
+      plot_data <- processedData()$plot_data
+      available_methods <- getAvailableDimMethods(plot_data)
+      dim_coords <- available_methods[[input$heatmapDimMethod]]
+      dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
+      
+      # Create grid layout (2 plots per row for larger size)
+      cols <- 2
+      bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 30
+      
+      # Larger plots with increased height
+      plot_height <- "500px"
+      
+      plot_list <- lapply(seq_along(markers), function(i) {
+        marker <- markers[i]
+        plot_id <- paste0("ultraFastHeatmap_", i)
+        
+        # Get display name for this marker
+        marker_display_name <- getMarkerDisplayName(marker, markerNameMappings())
+        
+        output[[plot_id]] <- renderPlot({
+          # No point restriction for static plots
+          opt_data <- optimizeHeatmapRendering(plot_data)
+          
+          p <- createMarkerExpressionHeatmap(
+            plot_data = opt_data,
+            marker = marker,
+            dim1 = dim_coords[1], 
+            dim2 = dim_coords[2],
+            method = input$heatmapMethod,
+            bins = bins_value,
+            title = marker_display_name,
+            font_size = 18,  # Smaller font for grid
+            color_palette = input$heatmapColorPalette
+          )
+          
+          # Minimal styling for speed
+          p + labs(x = dim_labels[1], y = dim_labels[2]) +
+            theme(
+              plot.title = element_text(size = 18, face = "bold"),
+              axis.title = element_text(size = 15),
+              axis.text = element_text(size = 14),
+              legend.title = element_text(size = 12),
+              legend.text = element_text(size = 10)
+            )
+        })
+        
+        column(6,
+          plotOutput(session$ns(plot_id), height = plot_height)
+        )
+      })
+      
+      # Add download button at the top
+      download_section <- fluidRow(
+        column(12,
+          div(class = "text-center", style = "margin-bottom: 20px;",
+            downloadButton(session$ns("downloadGridPlots"),
+                          "Download All Plots as PNG",
+                          class = "btn-success btn-lg",
+                          icon = icon("download"),
+                          style = "margin-bottom: 15px;"),
+            br(),
+            tags$small(class = "text-muted", 
+                      paste("Will save", length(markers), "individual plots + 1 combined overview (4-column layout) as high-resolution PNG files"))
+          )
+        )
+      )
+      
+      # Arrange plots in rows
+      grid_rows <- list()
+      for (i in seq(1, length(plot_list), by = cols)) {
+        row_plots <- plot_list[i:min(i + cols - 1, length(plot_list))]
+        grid_rows[[length(grid_rows) + 1]] <- fluidRow(do.call(tagList, row_plots))
+      }
+      
+      do.call(tagList, c(list(download_section), grid_rows))
+    })
+    
+    # Download handler for fast grid plots
+    output$downloadGridPlots <- downloadHandler(
+      filename = function() {
+        paste0("heatmap_grid_plots_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".zip")
+      },
+      content = function(file) {
+        req(processedData(), input$heatmapDimMethod)
+        
+        # Show progress
+        withProgress(message = "Generating high-resolution plots...", value = 0, {
+          
+          # Get current settings
+          markers <- processedData()$markers
+          plot_data <- processedData()$plot_data
+          available_methods <- getAvailableDimMethods(plot_data)
+          dim_coords <- available_methods[[input$heatmapDimMethod]]
+          dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
+          bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 30
+          
+          # Optimize data for rendering (no point restriction for static plots)
+          opt_data <- optimizeHeatmapRendering(plot_data)
+          
+          # Create temporary directory for PNG files
+          temp_dir <- tempdir()
+          png_dir <- file.path(temp_dir, "heatmap_plots")
+          if (dir.exists(png_dir)) unlink(png_dir, recursive = TRUE)
+          dir.create(png_dir, recursive = TRUE)
+          
+                     # Generate each plot and store for combined plot
+           png_files <- character()
+           individual_plots <- list()
+           
+           for (i in seq_along(markers)) {
+             incProgress(0.8/length(markers), detail = paste("Generating plot", i, "of", length(markers)))
+             
+             marker <- markers[i]
+             marker_display_name <- getMarkerDisplayName(marker, markerNameMappings())
+             
+             # Create safe filename
+             safe_name <- gsub("[^A-Za-z0-9._-]", "_", marker_display_name)
+             png_filename <- file.path(png_dir, paste0(sprintf("%02d", i), "_", safe_name, ".png"))
+             
+             # Create high-resolution plot
+             tryCatch({
+               p <- createMarkerExpressionHeatmap(
+                 plot_data = opt_data,
+                 marker = marker,
+                 dim1 = dim_coords[1], 
+                 dim2 = dim_coords[2],
+                 method = input$heatmapMethod,
+                 bins = bins_value,
+                 title = marker_display_name,
+                 font_size = 18,  # Use same font size as display
+                 color_palette = input$heatmapColorPalette
+               )
+               
+               # Apply theme matching the display with white background
+               p_final <- p + labs(x = dim_labels[1], y = dim_labels[2]) +
+                 theme(
+                   plot.title = element_text(size = 18, face = "bold"),
+                   axis.title = element_text(size = 15),
+                   axis.text = element_text(size = 14),
+                   legend.title = element_text(size = 12),
+                   legend.text = element_text(size = 10),
+                   panel.background = element_rect(fill = "white", color = NA),
+                   plot.background = element_rect(fill = "white", color = NA),
+                   legend.background = element_rect(fill = "white", color = NA)
+                 )
+               
+               # Save individual plot
+               ggsave(png_filename, plot = p_final, 
+                      width = 10, height = 8, dpi = 300, device = "png", bg = "white")
+               
+               png_files <- c(png_files, png_filename)
+               
+               # Store plot for combined layout (with smaller font for grid)
+               p_grid <- p + labs(x = dim_labels[1], y = dim_labels[2]) +
+                 theme(
+                   plot.title = element_text(size = 14, face = "bold"),
+                   axis.title = element_text(size = 11),
+                   axis.text = element_text(size = 10),
+                   legend.title = element_text(size = 10),
+                   legend.text = element_text(size = 8),
+                   panel.background = element_rect(fill = "white", color = NA),
+                   plot.background = element_rect(fill = "white", color = NA),
+                   legend.background = element_rect(fill = "white", color = NA),
+                   legend.key.size = unit(0.4, "cm")  # Smaller legend for grid
+                 )
+               
+               individual_plots[[i]] <- p_grid
+               
+             }, error = function(e) {
+               message("Error generating plot for ", marker, ": ", e$message)
+               individual_plots[[i]] <- NULL
+             })
+           }
+           
+           # Create combined plot with 4-column layout
+           incProgress(0.15, detail = "Creating combined overview plot...")
+           if (length(individual_plots) > 0) {
+             # Remove any NULL plots
+             valid_plots <- individual_plots[!sapply(individual_plots, is.null)]
+             
+             if (length(valid_plots) > 0) {
+               tryCatch({
+                 # Calculate grid dimensions (4 columns)
+                 n_plots <- length(valid_plots)
+                 n_cols <- 4
+                 n_rows <- ceiling(n_plots / n_cols)
+                 
+                 # Create combined plot filename
+                 combined_filename <- file.path(png_dir, "00_COMBINED_All_Markers.png")
+                 
+                 # Calculate dimensions for combined plot
+                 plot_width_per_panel <- 8  # inches per panel
+                 plot_height_per_panel <- 6  # inches per panel
+                 total_width <- n_cols * plot_width_per_panel
+                 total_height <- n_rows * plot_height_per_panel
+                 
+                 # Create combined plot using gridExtra
+                 combined_plot <- gridExtra::grid.arrange(grobs = valid_plots, ncol = n_cols)
+                 
+                 # Save combined plot
+                 ggsave(combined_filename, plot = combined_plot,
+                        width = total_width, height = total_height, 
+                        dpi = 300, device = "png", bg = "white")
+                 
+                 png_files <- c(combined_filename, png_files)  # Add to beginning of list
+                 
+               }, error = function(e) {
+                 message("Error creating combined plot: ", e$message)
+               })
+             }
+           }
+          
+          # Create ZIP file
+          if (length(png_files) > 0) {
+            # Change to the plot directory to avoid including full paths in ZIP
+            old_wd <- setwd(png_dir)
+            on.exit(setwd(old_wd))
+            
+            zip_files <- basename(png_files)
+            zip(file, files = zip_files, flags = "-r9X")
+            
+                         incProgress(0.05, detail = paste("Created ZIP with", length(png_files), "files"))
+             
+             # Check if combined plot was created
+             has_combined <- any(grepl("COMBINED", basename(png_files)))
+             individual_count <- length(png_files) - ifelse(has_combined, 1, 0)
+             
+             if (has_combined) {
+               showNotification(paste("Successfully exported", individual_count, "individual plots + 1 combined overview plot"), 
+                              type = "message", duration = 6)
+             } else {
+               showNotification(paste("Successfully exported", individual_count, "individual plots"), 
+                              type = "message", duration = 5)
+             }
+          } else {
+            # Create empty file if no plots generated
+            writeLines("No plots could be generated", file)
+            showNotification("No plots could be generated", type = "error")
+          }
+        })
+      }
+    )
     
     # Cluster visualization in dedicated tab
     output$clusterPlot <- renderPlotly({

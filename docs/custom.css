@@ -1,0 +1,45 @@
+/* Uniform width, centered images with overhang */
+img {
+  width: 900px !important;
+  height: auto !important;
+  display: block !important;
+  margin: 30px auto !important;
+  border: 1px solid #e1e4e8 !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+  object-fit: contain !important;
+}
+
+.markdown-body img {
+  width: 900px !important;
+  height: auto !important;
+  margin: 30px auto !important;
+}
+
+@media (min-width: 1200px) {
+  img {
+    width: 1000px !important;
+  }
+  .markdown-body img {
+    width: 1000px !important;
+  }
+}
+
+@media (max-width: 950px) {
+  img {
+    width: 95vw !important;
+  }
+  .markdown-body img {
+    width: 95vw !important;
+  }
+}
+
+@media (max-width: 768px) {
+  img {
+    width: 90vw !important;
+    margin: 20px auto !important;
+  }
+  .markdown-body img {
+    width: 90vw !important;
+  }
+}
