@@ -3,25 +3,7 @@ layout: default
 title: CytoVerse Documentation  
 ---
 
-<style>
-/* Auto-fix all images in the documentation */
-img {
-  max-width: 100% !important;
-  height: auto !important;
-  display: block;
-  margin: 20px auto;
-  border: 1px solid #e1e4e8;
-  border-radius: 6px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-@media (max-width: 768px) {
-  img {
-    margin: 15px auto;
-    max-width: 95% !important;
-  }
-}
-</style>
+<link rel="stylesheet" href="custom.css">
 
 # CytoVerse Documentation
 
