@@ -169,6 +169,17 @@ batchAnalysisModuleUI <- function(id) {
                   DT::dataTableOutput(ns("batchSampleTable"))
                 ),
                 
+                # Manual Assignment UI (conditional)
+                conditionalPanel(
+                  condition = paste0("input['", ns("groupingVariable"), "'] == 'Manual Assignment' && output['", ns("hasSamples"), "']"),
+                  shinydashboard::box(
+                    title = "Manual Group Assignment", status = "warning", solidHeader = TRUE,
+                    width = 12,
+                    p(icon("hand-pointer"), "Manually assign groups to each sample:"),
+                    uiOutput(ns("batchSampleList"))
+                  )
+                ),
+                
                 shinydashboard::box(
                   title = "Sample Management Actions", status = "warning", solidHeader = TRUE,
                   width = 12,
@@ -544,8 +555,8 @@ batchAnalysisModuleServer <- function(id, app_state) {
       operations = list()
     ))
     
-    # Function to add samples to the batch list
-    observeEvent(input$addSample, {
+    # Function to add samples to the batch list when files are uploaded
+    observeEvent(input$batchFile, {
       req(input$batchFile)
       
       # Get current sample list
@@ -558,10 +569,10 @@ batchAnalysisModuleServer <- function(id, app_state) {
         
         # Determine group based on filename pattern or default to "Unknown"
         group <- "Unknown"
-        if (input$groupingVariable == "Filename Pattern") {
-          if (grepl(input$patternControl, file_data$name, ignore.case = TRUE)) {
+        if (!is.null(input$groupingVariable) && input$groupingVariable == "Filename Pattern") {
+          if (!is.null(input$patternControl) && grepl(input$patternControl, file_data$name, ignore.case = TRUE)) {
             group <- "Control"
-          } else if (grepl(input$patternTreated, file_data$name, ignore.case = TRUE)) {
+          } else if (!is.null(input$patternTreated) && grepl(input$patternTreated, file_data$name, ignore.case = TRUE)) {
             group <- "Treated"
           }
         }
@@ -578,6 +589,10 @@ batchAnalysisModuleServer <- function(id, app_state) {
       
       # Update the sample list
       batchSamples(current_samples)
+      
+      # Show notification
+      showNotification(paste("Added", nrow(input$batchFile), "sample(s) to batch analysis"), 
+                       type = "message")
     })
     
     # Clear all samples
@@ -654,24 +669,27 @@ batchAnalysisModuleServer <- function(id, app_state) {
       }
     })
     
-    # Handle sample removal buttons
+    # Handle sample removal buttons - improved version
     observe({
       samples <- batchSamples()
       if (length(samples) == 0) return()
       
       # Check for remove button clicks
       for (id in names(samples)) {
-        # Local id to avoid capturing issues
-        local_id <- id 
-        remove_id <- paste0("remove_", local_id)
+        remove_id <- paste0("remove_", id)
         
-        # Create remove button observer
-        # Note: This creates many observers but is necessary for dynamic buttons
-        observeEvent(input[[remove_id]], {
-          current_samples <- batchSamples()
-          current_samples[[local_id]] <- NULL
-          batchSamples(current_samples)
-        }, ignoreInit = TRUE, ignoreNULL = TRUE)
+        # Check if the remove button was clicked
+        if (!is.null(input[[remove_id]]) && input[[remove_id]] > 0) {
+          # Use isolate to prevent reactive dependencies
+          isolate({
+            current_samples <- batchSamples()
+            if (id %in% names(current_samples)) {
+              current_samples[[id]] <- NULL
+              batchSamples(current_samples)
+              showNotification(paste("Removed sample:", samples[[id]]$name), type = "message")
+            }
+          })
+        }
       }
     })
     
@@ -712,6 +730,12 @@ batchAnalysisModuleServer <- function(id, app_state) {
         rownames = FALSE
       )
     })
+    
+    # Output to control visibility of manual assignment UI
+    output$hasSamples <- reactive({
+      length(batchSamples()) > 0
+    })
+    outputOptions(output, "hasSamples", suspendWhenHidden = FALSE)
     
     # Create marker selection UI for batch analysis
     output$batchMarkerSelectUI <- renderUI({

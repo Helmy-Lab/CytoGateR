@@ -296,8 +296,14 @@ createSignatureMarkerHeatmap <- function(control_centers, treated_centers,
   }
   
   # Convert to long format
+  # Determine which columns to exclude based on what exists
+  cols_to_exclude <- "Cluster"
+  if ("Population" %in% colnames(combined_centers)) {
+    cols_to_exclude <- c(cols_to_exclude, "Population")
+  }
+  
   combined_long <- combined_centers %>%
-    select(-Cluster, -Population) %>%
+    select(-all_of(cols_to_exclude)) %>%
     pivot_longer(cols = all_of(markers), names_to = "Marker", values_to = "Expression")
   
   # Scale expression values for heatmap
