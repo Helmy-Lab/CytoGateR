@@ -3,6 +3,8 @@ layout: default
 title: CytoVerse Documentation
 ---
 
+<link rel="stylesheet" href="custom.css">
+
 # 🧬 CytoVerse Documentation
 
 **An Interactive Flow Cytometry Analysis Platform**
