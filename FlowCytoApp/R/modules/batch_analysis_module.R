@@ -183,26 +183,20 @@ batchAnalysisModuleUI <- function(id) {
                 shinydashboard::box(
                   title = "Sample Management Actions", status = "warning", solidHeader = TRUE,
                   width = 12,
-                  fluidRow(
-                    column(4, 
-                      actionButton(ns("clearSamples"), "Clear All Samples", 
-                                   class = "btn-warning",
-                                   icon = icon("trash"),
-                                   style = "width: 100%")
-                    ),
-                    column(4, 
-                      downloadButton(ns("downloadSampleConfig"), "Save Sample Config", 
-                                     class = "btn-success",
-                                     icon = icon("save"),
-                                     style = "width: 100%")
-                    ),
-                    column(4, 
-                      fileInput(ns("uploadSampleConfig"), "Load Config", 
-                                accept = c(".csv"),
-                                buttonLabel = "Load Config",
-                                placeholder = "Choose CSV file")
-                    )
-                  )
+                  # Vertically stacked buttons for perfect alignment
+                  actionButton(ns("clearSamples"), "Clear All Samples", 
+                               class = "btn-warning",
+                               icon = icon("trash"),
+                               style = "width: 100%; margin-bottom: 10px;"),
+                  downloadButton(ns("downloadSampleConfig"), "Save Sample Config", 
+                                 class = "btn-success",
+                                 icon = icon("save"),
+                                 style = "width: 100%; margin-bottom: 10px;"),
+                  fileInput(ns("uploadSampleConfig"), "Load Config",
+                            accept = c(".csv"),
+                            buttonLabel = "Browse",
+                            placeholder = "Choose CSV file",
+                            width = "100%")
                 )
               ),
               
