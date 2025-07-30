@@ -23,7 +23,7 @@ permalink: /
 
 <div class="code-example" markdown="1">
 ### 🚀 [Getting Started]({% link getting-started.md %})
-Set up CytoVerse and learn the basics
+Set up CytoGateR and learn the basics
 
 ### ⚙️ [Settings]({% link settings.md %})
 Configure global plot preferences

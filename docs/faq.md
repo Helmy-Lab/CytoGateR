@@ -19,35 +19,35 @@ nav_order: 10
 
 ## General Questions
 
-### What file formats does CytoVerse support?
+### What file formats does CytoGateR support?
 {: .label .label-blue }
 
-**A:** CytoVerse supports .fcs (Flow Cytometry Standard), .csv, .tsv, and .xlsx files. FCS files are recommended for best compatibility across all features.
+**A:** CytoGateR supports .fcs (Flow Cytometry Standard), .csv, .tsv, and .xlsx files. FCS files are recommended for best compatibility across all features.
 
 ### What's the maximum file size I can upload?
 {: .label .label-blue }
 
 **A:** The current limit is 250MB per upload session. For larger datasets, consider using the batch analysis features or data sampling.
 
-### Can I use CytoVerse for mass cytometry (CyTOF) data?
+### Can I use CytoGateR for mass cytometry (CyTOF) data?
 {: .label .label-blue }
 
-**A:** Yes, CytoVerse works with mass cytometry data stored in FCS format. You may need to adjust transformation parameters for optimal visualization.
+**A:** Yes, CytoGateR works with mass cytometry data stored in FCS format. You may need to adjust transformation parameters for optimal visualization.
 
-### Is CytoVerse free to use?
+### Is CytoGateR free to use?
 {: .label .label-green }
 
-**A:** Yes, CytoVerse is freely available for academic and research use. Check with the Helmy Lab for any licensing requirements for commercial applications.
+**A:** Yes, CytoGateR is freely available for academic and research use. Check with the Helmy Lab for any licensing requirements for commercial applications.
 
 ### Do I need to install any software?
 {: .label .label-green }
 
-**A:** No, CytoVerse runs entirely in your web browser. No downloads or installations are required.
+**A:** No, CytoGateR runs entirely in your web browser. No downloads or installations are required.
 
-### Can I use CytoVerse offline?
+### Can I use CytoGateR offline?
 {: .label .label-yellow }
 
-**A:** No, CytoVerse requires an internet connection to function. All processing occurs on web servers.
+**A:** No, CytoGateR requires an internet connection to function. All processing occurs on web servers.
 
 ## Technical Questions
 
@@ -78,7 +78,7 @@ nav_order: 10
 ### Can I analyze spectral flow cytometry data?
 {: .label .label-blue }
 
-**A:** Yes, CytoVerse can handle spectral flow cytometry data. Ensure your data is properly unmixed and exported in FCS format from your acquisition software.
+**A:** Yes, CytoGateR can handle spectral flow cytometry data. Ensure your data is properly unmixed and exported in FCS format from your acquisition software.
 
 ### How many markers can I analyze simultaneously?
 {: .label .label-green }
@@ -161,9 +161,9 @@ nav_order: 10
 ### Can I get publication-quality statistics?
 {: .label .label-blue }
 
-**A:** CytoVerse provides population counts and percentages. For advanced statistics (p-values, effect sizes), export data and use statistical software like R, GraphPad Prism, or SPSS.
+**A:** CytoGateR provides population counts and percentages. For advanced statistics (p-values, effect sizes), export data and use statistical software like R, GraphPad Prism, or SPSS.
 
-### How do I cite CytoVerse in my paper?
+### How do I cite CytoGateR in my paper?
 {: .label .label-green }
 
 **A:** Include the software name, version (if available), and the Helmy Lab as developers. Check with the lab for specific citation requirements and any associated publications.
@@ -208,10 +208,10 @@ nav_order: 10
 
 ## Advanced Usage Questions
 
-### Can I write scripts to automate CytoVerse analysis?
+### Can I write scripts to automate CytoGateR analysis?
 {: .label .label-yellow }
 
-**A:** Currently, CytoVerse is designed for interactive use through the web interface. Scripting capabilities may be added in future versions.
+**A:** Currently, CytoGateR is designed for interactive use through the web interface. Scripting capabilities may be added in future versions.
 
 ### How do I handle batch effects in my data?
 {: .label .label-yellow }
@@ -248,12 +248,12 @@ If your question isn't answered here:
 1. **Check the documentation**: Review the relevant module documentation
 2. **Try the troubleshooting guide**: Many common issues have specific solutions
 3. **Contact the Helmy Lab**: Reach out for technical support or feature requests
-4. **Join the community**: Connect with other CytoVerse users for tips and advice
+4. **Join the community**: Connect with other CytoGateR users for tips and advice
 
 ### Feature Requests
 {: .label .label-purple }
 
-CytoVerse is actively developed. If you have suggestions for new features or improvements:
+CytoGateR is actively developed. If you have suggestions for new features or improvements:
 
 - Contact the development team with detailed descriptions
 - Provide use cases for requested features
