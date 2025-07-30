@@ -1,0 +1,20 @@
+title: CytoGateR
+description: A Comprehensive Flow Cytometry Analysis Platform
+remote_theme: just-the-docs/just-the-docs
+
+# Enable search
+search_enabled: true
+
+# Color scheme (optional)
+color_scheme: light
+
+# Footer
+footer_content: "CytoGateR - An Interactive Flow Cytometry Analysis Platform"
+
+# Plugins (GitHub Pages supports these automatically)
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+# Navigation
+nav_sort: case_insensitive
