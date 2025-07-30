@@ -1,35 +1,62 @@
 ---
 layout: default
-title: CytoVerse Documentation
+title: Home
+nav_order: 1
+description: "CytoGateR - A Comprehensive Flow Cytometry Analysis Platform"
+permalink: /
 ---
 
 <link rel="stylesheet" href="custom.css">
 
-# 🧬 CytoVerse Documentation
+# CytoGateR Documentation
+{: .fs-9 }
 
-**An Interactive Flow Cytometry Analysis Platform**
+**A Comprehensive Flow Cytometry Analysis Platform**
+{: .fs-6 .fw-300 }
 
-## 📖 Documentation
-- [Complete Manual](documentation.html) - Full comprehensive guide
-- [Getting Started](documentation.html#getting-started)
-- [Settings](documentation.html#settings)
-- [Spillover Compensation](documentation.html#spillover-compensation)
-- [Interactive Gating](documentation.html#interactive-gating)
-- [Raw Data Analysis](documentation.html#raw-data-analysis)
-- [Batch Analysis](documentation.html#batch-analysis)
-- [Processed Data](documentation.html#processed-data)
-- [Troubleshooting](documentation.html#troubleshooting)
-
-## About CytoVerse
-
-CytoVerse is a powerful, web-based flow cytometry analysis platform designed to streamline your cytometry workflow from raw data processing to publication-ready results.
-
-### Key Features
-- 📊 Comprehensive analysis pipeline
-- 🔧 Interactive gating with real-time statistics  
-- 📈 Advanced visualization options
-- ⚡ Batch processing capabilities
-- 🎨 Publication-ready figures
-- 💾 Template system for reproducible workflows
+[Get Started](#getting-started){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[View on GitHub](https://github.com/Helmy-Lab/FlowCytoAppProject){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
+
+## Quick Navigation
+
+<div class="code-example" markdown="1">
+### 🚀 [Getting Started]({% link getting-started.md %})
+Set up CytoGateR and learn the basics
+
+### ⚙️ [Settings]({% link settings.md %})
+Configure global plot preferences
+
+### 🔧 [Spillover Compensation]({% link compensation.md %})
+Remove fluorophore spillover
+
+### 🎯 [Interactive Gating]({% link gating.md %})
+Define cell populations
+
+### 📊 [Raw Data Analysis]({% link raw-data.md %})
+Process and analyze raw flow cytometry data
+
+### ⚡ [Batch Analysis]({% link batch-analysis.md %})
+Process multiple samples simultaneously
+
+### 📈 [Processed Data]({% link processed-data.md %})
+Advanced visualization and analysis
+</div>
+
+## Key Features
+
+- **📊 Comprehensive Analysis Pipeline**: From spillover compensation to advanced clustering
+- **🔧 Interactive Gating**: Intuitive hierarchical gating with real-time statistics
+- **📈 Advanced Visualization**: Multiple plot types optimized for flow cytometry data
+- **⚡ Batch Processing**: Analyze dozens of samples simultaneously with standardized parameters
+- **🎨 Customizable Plots**: Publication-ready figures with extensive customization options
+- **💾 Template System**: Save and reuse analysis workflows for consistent results
+
+## Typical Workflow
+
+1. **Upload & Preprocess**: Load raw FCS files and apply quality control
+2. **Compensation**: Remove fluorophore spillover using control files
+3. **Gating**: Define cell populations through hierarchical gating
+4. **Analysis**: Apply dimensionality reduction and clustering algorithms
+5. **Export**: Generate publication-ready results and statistics
