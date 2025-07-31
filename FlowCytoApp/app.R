@@ -29,7 +29,7 @@ ui <- navbarPage(
   ),
   
   # Application title
-  title = "CytoVerse",
+  title = "CytoGateR",
   
   # Tab for the Settings Module
   tabPanel("Settings", 
