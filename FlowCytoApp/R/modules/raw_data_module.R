@@ -221,6 +221,32 @@ rawDataModuleUI <- function(id) {
                                                  "Inferno" = "inferno"),
                                       selected = "plasma"),
                            
+                           # Legend Style Options
+                           radioButtons(ns("legendStyle"), "Legend Style:",
+                                       choices = list(
+                                         "Qualitative (Low/Medium/High)" = "qualitative",
+                                         "Numerical (actual values)" = "numerical"
+                                       ),
+                                       selected = "qualitative"),
+                           
+                           conditionalPanel(
+                             condition = paste0("input['", ns("legendStyle"), "'] == 'qualitative'"),
+                             selectInput(ns("labelStyle"), "Label Detail:",
+                                        choices = list(
+                                          "Simple (Low/High)" = "simple",
+                                          "Standard (Low/Medium/High)" = "standard",
+                                          "Detailed (5 levels)" = "detailed",
+                                          "Biological (Negative/Dim/Bright)" = "biological"
+                                        ),
+                                        selected = "standard"),
+                             helpText("Uses consistent qualitative labels across all markers while preserving biological relationships.")
+                           ),
+                           
+                           conditionalPanel(
+                             condition = paste0("input['", ns("legendStyle"), "'] == 'numerical'"),
+                             helpText("Shows actual transformed values. Note: ranges may differ between markers.")
+                           ),
+                           
                            hr(),
                            
                            # Marker Renaming Section
@@ -1644,12 +1670,22 @@ rawDataModuleServer <- function(id, app_state) {
           tsne_result <- do.call(Rtsne, c(list(X = data_matrix), tsne_params))
           
           results$tsne <- data.frame(tsne1 = tsne_result$Y[,1], tsne2 = tsne_result$Y[,2])
+          
+          # MEMORY OPTIMIZATION: Clear t-SNE intermediate objects immediately
+          tsne_result <- NULL
+          data_matrix <- NULL
+          tsne_params <- NULL
+          gc(verbose = FALSE)
         }
         
         if ("UMAP" %in% input$methods) {
           incProgress(0.7, detail = "Running UMAP...")
           umap_result <- umap(preprocessing_results$scaled_data, n_neighbors = input$n_neighbors)
           results$umap <- data.frame(umap1 = umap_result[,1], umap2 = umap_result[,2])
+          
+          # MEMORY OPTIMIZATION: Clear UMAP intermediate objects immediately
+          umap_result <- NULL
+          gc(verbose = FALSE)
         }
         
         if ("PCA" %in% input$methods) {
@@ -1666,6 +1702,10 @@ rawDataModuleServer <- function(id, app_state) {
           
           # Store PCA summary information for metrics
           results$pca_summary <- summary(pca_result)
+          
+          # MEMORY OPTIMIZATION: Clear PCA intermediate objects immediately
+          pca_result <- NULL
+          gc(verbose = FALSE)
         }
         
         if ("MDS" %in% input$methods) {
@@ -1674,21 +1714,35 @@ rawDataModuleServer <- function(id, app_state) {
           dist_matrix <- dist(data_matrix)
           mds_result <- cmdscale(dist_matrix, k = 2)
           results$mds <- data.frame(mds1 = mds_result[,1], mds2 = mds_result[,2])
+          
+          # MEMORY OPTIMIZATION: Clear MDS intermediate objects immediately (these can be very large)
+          data_matrix <- NULL
+          dist_matrix <- NULL
+          mds_result <- NULL
+          gc(verbose = FALSE)
         }
         
         # Create plot data
         plot_data <- as.data.frame(preprocessing_results$sampled_data)
         colnames(plot_data) <- input$selectedMarkers
         
-        # Add dimensionality reduction coordinates
+        # Add dimensionality reduction coordinates and clear each result immediately after use
         if (!is.null(results$tsne)) {
           plot_data$tsne1 <- results$tsne$tsne1
           plot_data$tsne2 <- results$tsne$tsne2
+          # MEMORY OPTIMIZATION: Clear t-SNE results after adding to plot_data
+          results$tsne <- NULL
+          gc(verbose = FALSE)
         }
+        
         if (!is.null(results$umap)) {
           plot_data$umap1 <- results$umap$umap1
           plot_data$umap2 <- results$umap$umap2
+          # MEMORY OPTIMIZATION: Clear UMAP results after adding to plot_data
+          results$umap <- NULL
+          gc(verbose = FALSE)
         }
+        
         if (!is.null(results$pca)) {
           plot_data$pca1 <- results$pca$pca1
           plot_data$pca2 <- results$pca$pca2
@@ -1702,14 +1756,29 @@ rawDataModuleServer <- function(id, app_state) {
               }
             }
           }
+          # MEMORY OPTIMIZATION: Clear PCA results after adding to plot_data
+          results$pca <- NULL
+          gc(verbose = FALSE)
         }
+        
         if (!is.null(results$mds)) {
           plot_data$mds1 <- results$mds$mds1
           plot_data$mds2 <- results$mds$mds2
+          # MEMORY OPTIMIZATION: Clear MDS results after adding to plot_data
+          results$mds <- NULL
+          gc(verbose = FALSE)
         }
         
         results$plot_data <- plot_data
         results$markers <- input$selectedMarkers
+        
+        # MEMORY OPTIMIZATION: Clear preprocessing intermediate data that's no longer needed
+        # Keep only essential results for downstream analysis
+        preprocessing_results$qc_data <- NULL
+        preprocessing_results$gated_data <- NULL
+        preprocessing_results$transformed_data <- NULL
+        # Keep sampled_data and scaled_data as they're needed for clustering
+        gc(verbose = FALSE)
         
         # CRITICAL: Preserve original flowSet for gating module compatibility
         if (inherits(raw_data, "flowFrame")) {
@@ -1721,6 +1790,11 @@ rawDataModuleServer <- function(id, app_state) {
         }
         
         processedData(results)
+        
+        # MEMORY OPTIMIZATION: Final cleanup after storing results
+        plot_data <- NULL
+        preprocessing_results <- NULL
+        gc(verbose = FALSE)
         
         # Display notification about preprocessing results
         if (!is.null(results$metrics)) {
@@ -2558,7 +2632,9 @@ rawDataModuleServer <- function(id, app_state) {
         bins = bins_value,
         title = paste(input$heatmapMarker, "Expression on", input$heatmapDimMethod),
         font_size = app_state$plot_settings$font_size,
-        color_palette = input$heatmapColorPalette
+        color_palette = input$heatmapColorPalette,
+        use_qualitative_labels = (input$legendStyle == "qualitative"),
+        label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
       )
       
       # Customize axis labels
@@ -2646,7 +2722,9 @@ rawDataModuleServer <- function(id, app_state) {
         bins = bins_value,
         title = paste(marker_display_name, "Expression on", input$heatmapDimMethod),
         font_size = app_state$plot_settings$font_size,
-        color_palette = input$heatmapColorPalette
+        color_palette = input$heatmapColorPalette,
+        use_qualitative_labels = (input$legendStyle == "qualitative"),
+        label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
       )
       
       # Customize axis labels
@@ -2927,7 +3005,9 @@ rawDataModuleServer <- function(id, app_state) {
             bins = bins_value,
             title = marker_display_name,
             font_size = 18,  # Smaller font for grid
-            color_palette = input$heatmapColorPalette
+            color_palette = input$heatmapColorPalette,
+            use_qualitative_labels = (input$legendStyle == "qualitative"),
+            label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
           )
           
           # Minimal styling for speed
@@ -3025,7 +3105,9 @@ rawDataModuleServer <- function(id, app_state) {
                  bins = bins_value,
                  title = marker_display_name,
                  font_size = 18,  # Use same font size as display
-                 color_palette = input$heatmapColorPalette
+                 color_palette = input$heatmapColorPalette,
+                 use_qualitative_labels = (input$legendStyle == "qualitative"),
+                 label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
                )
                
                # Apply theme matching the display with white background

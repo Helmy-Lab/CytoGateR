@@ -190,6 +190,11 @@ clusteringModuleServer <- function(id, input_data, app_state) {
         incProgress(0.3, detail = paste("Running", method, "clustering..."))
         cluster_result <- runClustering(marker_data, method, params)
         
+        # MEMORY OPTIMIZATION: Clear clustering parameters and intermediate data
+        params <- NULL
+        marker_data <- NULL
+        gc(verbose = FALSE)
+        
         # Store clustering results
         if (!is.null(cluster_result)) {
           clustering_results(cluster_result)
@@ -215,6 +220,13 @@ clusteringModuleServer <- function(id, input_data, app_state) {
             # Store population results
             populations(pop_result)
             
+            # MEMORY OPTIMIZATION: Clear population identification intermediate data
+            pop_result <- NULL
+            high_threshold <- NULL
+            low_threshold <- NULL
+            min_confidence <- NULL
+            gc(verbose = FALSE)
+            
             # Show success notification
             showNotification(
               paste("Cell clustering complete with", method, "and populations identified"),
@@ -232,6 +244,12 @@ clusteringModuleServer <- function(id, input_data, app_state) {
               duration = 4
             )
           }
+          
+          # MEMORY OPTIMIZATION: Final cleanup after clustering is complete
+          cluster_result <- NULL
+          marker_names <- NULL
+          method <- NULL
+          gc(verbose = FALSE)
         } else {
           # Show error notification if clustering failed
           showNotification(

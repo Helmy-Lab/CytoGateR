@@ -910,10 +910,20 @@ batchAnalysisModuleServer <- function(id, app_state) {
               dr_result <- do.call(Rtsne, c(list(X = data_matrix), tsne_params))
               
               reduced_data <- data.frame(dim1 = dr_result$Y[,1], dim2 = dr_result$Y[,2])
+              
+              # MEMORY OPTIMIZATION: Clear t-SNE intermediate objects immediately
+              dr_result <- NULL
+              data_matrix <- NULL
+              tsne_params <- NULL
+              gc(verbose = FALSE)
             } else if (input$batchDimRedMethod == "UMAP") {
               # Run UMAP
               umap_result <- umap(preprocess_results$scaled_data, n_neighbors = input$batchNeighbors)
               reduced_data <- data.frame(dim1 = umap_result[,1], dim2 = umap_result[,2])
+              
+              # MEMORY OPTIMIZATION: Clear UMAP intermediate objects immediately
+              umap_result <- NULL
+              gc(verbose = FALSE)
             } else if (input$batchDimRedMethod == "PCA") {
               # Run PCA
               num_components <- input$batchPcaComponents
@@ -924,6 +934,11 @@ batchAnalysisModuleServer <- function(id, app_state) {
                   reduced_data[[paste0("PC", i)]] <- pca_result$x[, i]
                 }
               }
+              
+              # MEMORY OPTIMIZATION: Clear PCA intermediate objects immediately
+              pca_result <- NULL
+              num_components <- NULL
+              gc(verbose = FALSE)
             } else if (input$batchDimRedMethod == "MDS") {
               # Run MDS
               incProgress(0.1, detail = "Running MDS...")
@@ -935,6 +950,12 @@ batchAnalysisModuleServer <- function(id, app_state) {
               
               # Store MDS results in dim1 and dim2
               reduced_data <- data.frame(dim1 = mds_result[,1], dim2 = mds_result[,2])
+              
+              # MEMORY OPTIMIZATION: Clear MDS intermediate objects immediately (these are often very large)
+              data_matrix <- NULL
+              dist_matrix <- NULL
+              mds_result <- NULL
+              gc(verbose = FALSE)
             }
             
             # Create plot data
@@ -1028,6 +1049,14 @@ batchAnalysisModuleServer <- function(id, app_state) {
               num_cells = nrow(plot_data),
               processed_time = Sys.time()
             )
+            
+            # MEMORY OPTIMIZATION: Final cleanup for this sample before returning
+            file_data <- NULL
+            reduced_data <- NULL
+            marker_data <- NULL
+            population_map <- NULL
+            if (exists("preprocessing_params")) preprocessing_params <- NULL
+            gc(verbose = FALSE)
             
             return(sample_result)
           }
