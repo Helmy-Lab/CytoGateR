@@ -23,17 +23,96 @@ getViridisColorScale <- function(color_palette, name, option_type = "color") {
   }
 }
 
-# Helper function to apply color palette to a ggplot object
-applyColorPalette <- function(plot_obj, color_palette, marker_name, scale_type = "color") {
+# Enhanced color scale with qualitative labels for consistent heatmap legends
+getQualitativeColorScale <- function(color_palette, name, option_type = "color", 
+                                   use_qualitative_labels = TRUE, label_style = "standard") {
+  
+  # Get the base viridis option
+  option <- switch(color_palette,
+                   "plasma" = "plasma",
+                   "viridis" = "viridis", 
+                   "magma" = "magma",
+                   "inferno" = "inferno",
+                   "plasma")  # default
+  
+  if (use_qualitative_labels) {
+    # Define label sets for different styles
+    labels_and_breaks <- switch(label_style,
+      "simple" = list(
+        breaks = c(0, 1),
+        labels = c("Low", "High")
+      ),
+      "standard" = list(
+        breaks = c(0, 0.5, 1),
+        labels = c("Low", "Medium", "High")
+      ),
+      "detailed" = list(
+        breaks = c(0, 0.25, 0.5, 0.75, 1),
+        labels = c("Very Low", "Low", "Medium", "High", "Very High")
+      ),
+      "biological" = list(
+        breaks = c(0, 0.2, 0.4, 0.7, 1),
+        labels = c("Negative", "Dim", "Intermediate", "Bright", "Very Bright")
+      ),
+      # Default to standard
+      list(
+        breaks = c(0, 0.5, 1),
+        labels = c("Low", "Medium", "High")
+      )
+    )
+    
+    # Use qualitative labels for consistent appearance
+    if (option_type == "color") {
+      return(
+        scale_color_viridis_c(
+          name = name, 
+          option = option,
+          breaks = labels_and_breaks$breaks,
+          labels = labels_and_breaks$labels,
+          limits = c(0, 1),
+          oob = scales::squish,
+          guide = guide_colorbar(title.position = "top", title.hjust = 0.5)
+        )
+      )
+    } else if (option_type == "fill") {
+      return(
+        scale_fill_viridis_c(
+          name = name, 
+          option = option,
+          breaks = labels_and_breaks$breaks,
+          labels = labels_and_breaks$labels,
+          limits = c(0, 1),
+          oob = scales::squish,
+          guide = guide_colorbar(title.position = "top", title.hjust = 0.5)
+        )
+      )
+    } else if (option_type == "fill_discrete") {
+      return(scale_fill_viridis_d(name = name, option = option))
+    }
+  } else {
+    # Original numerical labels
+    if (option_type == "color") {
+      return(scale_color_viridis_c(name = name, option = option))
+    } else if (option_type == "fill") {
+      return(scale_fill_viridis_c(name = name, option = option))
+    } else if (option_type == "fill_discrete") {
+      return(scale_fill_viridis_d(name = name, option = option))
+    }
+  }
+}
+
+# Enhanced helper function to apply color palette with qualitative legend option
+applyColorPalette <- function(plot_obj, color_palette, marker_name, scale_type = "color",
+                             use_qualitative_labels = TRUE, label_style = "standard") {
   if (scale_type == "color") {
-    return(plot_obj + getViridisColorScale(color_palette, marker_name, "color"))
+    return(plot_obj + getQualitativeColorScale(color_palette, marker_name, "color", use_qualitative_labels, label_style))
   } else if (scale_type == "fill") {
-    return(plot_obj + getViridisColorScale(color_palette, marker_name, "fill"))
+    return(plot_obj + getQualitativeColorScale(color_palette, marker_name, "fill", use_qualitative_labels, label_style))
   } else if (scale_type == "both") {
     # For contour plots that need both color and fill
     return(plot_obj + 
-           getViridisColorScale(color_palette, paste(marker_name, "Points"), "color") +
-           getViridisColorScale(color_palette, paste(marker_name, "Level"), "fill_discrete"))
+           getQualitativeColorScale(color_palette, paste(marker_name, "Points"), "color", use_qualitative_labels, label_style) +
+           getViridisColorScale(color_palette, paste(marker_name, "Level"), "fill_discrete"))  # Keep discrete for contours
   }
 }
 
@@ -571,7 +650,9 @@ createCompensationComparisonPlot <- function(original_data, compensated_data,
 createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim2 = "tsne2", 
                                          method = "hex", bins = 50, 
                                          title = NULL, font_size = 12,
-                                         color_palette = "plasma") {
+                                         color_palette = "plasma",
+                                         use_qualitative_labels = TRUE,
+                                         label_style = "standard") {
   
   if (is.null(title)) {
     title <- paste(marker, "Expression Heatmap")
@@ -618,8 +699,8 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
           theme_minimal(base_size = font_size) +
           coord_fixed()
         
-        # Apply color palette
-        p <- applyColorPalette(p, color_palette, marker, "fill")
+            # Apply color palette with user-specified legend style
+    p <- applyColorPalette(p, color_palette, marker, "fill", use_qualitative_labels, label_style)
         
       }, error = function(e) {
         # If binning fails, fall back to scatter plot
@@ -647,8 +728,8 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
       theme_minimal(base_size = font_size) +
       coord_fixed()
     
-    # Apply color palette
-    p <- applyColorPalette(p, color_palette, marker, "color")
+    # Apply color palette with user-specified legend style
+    p <- applyColorPalette(p, color_palette, marker, "color", use_qualitative_labels, label_style)
       
   } else if (method == "contour") {
     # Filled contours based on marker expression - with error handling
@@ -681,8 +762,8 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
           theme_minimal(base_size = font_size) +
           coord_fixed()
         
-        # Apply color palettes
-        p <- applyColorPalette(p, color_palette, marker, "both")
+            # Apply color palettes with user-specified legend style
+    p <- applyColorPalette(p, color_palette, marker, "both", use_qualitative_labels, label_style)
         
       }, error = function(e) {
         # If contour generation fails, fall back to scatter plot
@@ -710,8 +791,8 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
       theme_minimal(base_size = font_size) +
       coord_fixed()
     
-    # Apply color palette
-    p <- applyColorPalette(p, color_palette, marker, "color")
+    # Apply color palette with user-specified legend style
+    p <- applyColorPalette(p, color_palette, marker, "color", use_qualitative_labels, label_style)
   }
   
   # Apply enhanced theme
@@ -725,6 +806,11 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
       panel.grid.minor = element_blank(),
       panel.border = element_rect(color = "grey80", fill = NA)
     )
+  
+  # MEMORY OPTIMIZATION: Clear any intermediate variables that might still be in memory
+  if (exists("marker_values")) marker_values <- NULL
+  if (exists("valid_values")) valid_values <- NULL
+  gc(verbose = FALSE)
   
   return(p)
 }
@@ -754,7 +840,13 @@ optimizeHeatmapRendering <- function(plot_data, max_points = 10000) {
   if (nrow(plot_data) > max_points) {
     # Stratified sampling to preserve structure
     sample_indices <- sample(nrow(plot_data), max_points)
-    return(plot_data[sample_indices, ])
+    result <- plot_data[sample_indices, ]
+    
+    # MEMORY OPTIMIZATION: Clear sampling indices immediately
+    sample_indices <- NULL
+    gc(verbose = FALSE)
+    
+    return(result)
   }
   return(plot_data)
 }
@@ -763,7 +855,9 @@ optimizeHeatmapRendering <- function(plot_data, max_points = 10000) {
 createMultiMarkerHeatmapGrid <- function(plot_data, markers, dim1, dim2, 
                                         method = "hex", bins = 30,
                                         color_palette = "plasma", font_size = 10,
-                                        ncol = 3) {
+                                        ncol = 3,
+                                        use_qualitative_labels = TRUE,
+                                        label_style = "standard") {
   
   # Optimize data for rendering
   opt_data <- optimizeHeatmapRendering(plot_data)
@@ -783,7 +877,9 @@ createMultiMarkerHeatmapGrid <- function(plot_data, markers, dim1, dim2,
       bins = bins,
       title = marker,
       font_size = font_size,
-      color_palette = color_palette
+      color_palette = color_palette,
+      use_qualitative_labels = use_qualitative_labels,
+      label_style = label_style
     )
     
     plot_list[[i]] <- p
