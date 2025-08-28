@@ -311,19 +311,7 @@ compensationModuleUI <- function(id) {
                               width = 12,
                               
                               shinycssloaders::withSpinner(
-                                plotOutput(ns("before_after_plots"), height = "400px")
-                              )
-                            ),
-                            
-                            # Pairwise Scatterplots
-                            shinydashboard::box(
-                              title = "Pairwise Channel Analysis", 
-                              status = "success", 
-                              solidHeader = TRUE,
-                              width = 12,
-                              
-                              shinycssloaders::withSpinner(
-                                plotOutput(ns("pairwise_plots"), height = "500px")
+                                plotOutput(ns("before_after_plots"), height = "600px")
                               )
                             )
                      )
@@ -1605,7 +1593,7 @@ compensationModuleServer <- function(id, app_state) {
         # Read CSV or Excel file
         ext <- tools::file_ext(input$matrix_upload$name)
         if (ext == "csv") {
-          spillover_matrix <- read.csv(input$matrix_upload$datapath, row.names = 1)
+          spillover_matrix <- read.csv(input$matrix_upload$datapath, row.names = 1, check.names = FALSE)
         } else if (ext %in% c("xlsx", "xls")) {
           spillover_matrix <- openxlsx::read.xlsx(input$matrix_upload$datapath, rowNames = TRUE)
         } else {
@@ -2090,12 +2078,7 @@ compensationModuleServer <- function(id, app_state) {
       values$qc_results$before_after_plot
     })
     
-    # Pairwise Plots
-    output$pairwise_plots <- renderPlot({
-      req(values$qc_results)
-      
-      values$qc_results$pairwise_plot
-    })
+
     
     # Apply compensation to experimental files only - triggered when matrix is available
     observeEvent(values$current_matrix, {
@@ -2687,23 +2670,19 @@ performCompensationQC <- function(file_assignments, file_paths, file_names, spil
   # Combine metrics
   metrics_df <- do.call(rbind, metrics_list)
   
-  # Create before/after comparison plot
-  before_after_plot <- createBeforeAfterPlot(file_assignments, file_paths, file_names, spillover_matrix, channels[1:2])
-  
-  # Create pairwise plot
-  pairwise_plot <- createPairwisePlot(file_assignments, file_paths, file_names, spillover_matrix, channels)
+  # Create before/after comparison plot for ALL channels
+  before_after_plot <- createBeforeAfterPlot(file_assignments, file_paths, file_names, spillover_matrix, channels)
   
   return(list(
     metrics = metrics_df,
-    before_after_plot = before_after_plot,
-    pairwise_plot = pairwise_plot
+    before_after_plot = before_after_plot
   ))
 }
 
 # Helper function to create before/after plots
 createBeforeAfterPlot <- function(file_assignments, file_paths, file_names, spillover_matrix, channels) {
   
-  if (length(channels) < 2) return(ggplot() + labs(title = "Need at least 2 channels"))
+  if (length(channels) < 1) return(ggplot() + labs(title = "Need at least 1 channel"))
   
   # Get first control file (non-unstained)
   control_channels <- setdiff(names(file_assignments), "unstained")
@@ -2722,88 +2701,58 @@ createBeforeAfterPlot <- function(file_assignments, file_paths, file_names, spil
   comp_obj <- compensation(spillover_matrix)
   ff_comp <- compensate(ff, comp_obj)
   
-  # Extract data
-  before_data <- data.frame(
-    x = exprs(ff)[, channels[1]],
-    y = exprs(ff)[, channels[2]],
-    Type = "Before"
-  )
+  # Prepare data for all selected channels (1D density plots)
+  plot_data_list <- list()
   
-  after_data <- data.frame(
-    x = exprs(ff_comp)[, channels[1]],
-    y = exprs(ff_comp)[, channels[2]],
-    Type = "After"
-  )
+  for (channel in channels) {
+    before_data <- data.frame(
+      Expression = exprs(ff)[, channel],
+      Channel = channel,
+      Type = "Before Compensation"
+    )
+    
+    after_data <- data.frame(
+      Expression = exprs(ff_comp)[, channel],
+      Channel = channel,
+      Type = "After Compensation"
+    )
+    
+    plot_data_list[[channel]] <- rbind(before_data, after_data)
+  }
   
-  plot_data <- rbind(before_data, after_data)
+  # Combine all channel data
+  plot_data <- do.call(rbind, plot_data_list)
   
-  ggplot(plot_data, aes(x = x, y = y, color = after_stat(ndensity))) +
-    geom_pointdensity(alpha = 0.6, size = 0.5) +
-    facet_wrap(~Type, scales = "free") +
-    scale_color_viridis_c() +
+  # Create 1D density plots for compensation QC - dynamically adjust columns
+  n_channels <- length(unique(plot_data$Channel))
+  ncol_setting <- if (n_channels <= 2) 2 else if (n_channels <= 4) 2 else 3
+  
+  ggplot(plot_data, aes(x = Expression, fill = Type, color = Type)) +
+    geom_density(alpha = 0.6, size = 0.8) +
+    facet_wrap(~Channel, scales = "free", ncol = ncol_setting) +
+    scale_fill_manual(values = c("Before Compensation" = "#E31A1C", "After Compensation" = "#1F78B4")) +
+    scale_color_manual(values = c("Before Compensation" = "#E31A1C", "After Compensation" = "#1F78B4")) +
+    geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.7, color = "gray50") +
     labs(
-      title = paste("Before/After Compensation:", control_channels[1], "Control"),
-      x = channels[1],
-      y = channels[2],
-      color = "Density"
+      title = paste("Compensation Quality Control: All Channels -", control_channels[1], "Control"),
+      x = "Expression Level",
+      y = "Density",
+      subtitle = paste("Before vs. After compensation analysis for", n_channels, "channels"),
+      fill = "Condition",
+      color = "Condition"
     ) +
-    theme_minimal()
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5, size = 11, color = "gray50"),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.title = element_text(size = 10),
+      axis.title = element_text(size = 11)
+    )
 }
 
-# Helper function to create pairwise plots
-createPairwisePlot <- function(file_assignments, file_paths, file_names, spillover_matrix, channels) {
-  
-  if (length(channels) < 2) return(ggplot() + labs(title = "Need at least 2 channels"))
-  
-  # Use first few channels for pairwise analysis
-  n_channels <- min(4, length(channels))
-  selected_channels <- channels[1:n_channels]
-  
-  # Get unstained control
-  unstained_file <- file_assignments$unstained
-  file_idx <- which(file_names == unstained_file)
-  ff <- read.FCS(file_paths[file_idx], transformation = FALSE)
-  
-  # Sample data
-  if (nrow(ff) > 3000) {
-    ff <- ff[sample(nrow(ff), 3000), ]
-  }
-  
-  # Apply compensation
-  comp_obj <- compensation(spillover_matrix)
-  ff_comp <- compensate(ff, comp_obj)
-  
-  # Create pairwise plots
-  plot_list <- list()
-  
-  for (i in 1:(n_channels-1)) {
-    for (j in (i+1):n_channels) {
-      plot_data <- data.frame(
-        x = exprs(ff_comp)[, selected_channels[i]],
-        y = exprs(ff_comp)[, selected_channels[j]]
-      )
-      
-      p <- ggplot(plot_data, aes(x = x, y = y, color = after_stat(ndensity))) +
-        geom_pointdensity(alpha = 0.6, size = 0.3) +
-        scale_color_viridis_c() +
-        labs(
-          x = selected_channels[i],
-          y = selected_channels[j]
-        ) +
-        theme_minimal() +
-        theme(legend.position = "none")
-      
-      plot_list[[paste(i, j, sep = "_")]] <- p
-    }
-  }
-  
-  # Arrange plots
-  if (length(plot_list) > 0) {
-    gridExtra::grid.arrange(grobs = plot_list, ncol = 2)
-  } else {
-    ggplot() + labs(title = "No pairwise combinations available")
-  }
-}
+
 
 # Enhanced channel normalization for flow cytometry naming conventions
 normalizeChannelName <- function(channel_name) {

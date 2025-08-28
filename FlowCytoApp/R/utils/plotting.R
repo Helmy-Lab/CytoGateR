@@ -23,96 +23,253 @@ getViridisColorScale <- function(color_palette, name, option_type = "color") {
   }
 }
 
-# Enhanced color scale with qualitative labels for consistent heatmap legends
+# Helper function to generate qualitative labels
+generateQualitativeLabels <- function(breaks, label_style) {
+  if (length(breaks) == 0) return(character(0))
+  
+  # Remove NA values from breaks
+  valid_breaks <- breaks[!is.na(breaks)]
+  if (length(valid_breaks) == 0) return(character(0))
+  
+  min_val <- min(valid_breaks, na.rm = TRUE)
+  max_val <- max(valid_breaks, na.rm = TRUE)
+  
+  if (min_val == max_val) return(rep("Uniform", length(breaks)))
+  
+  # Normalize breaks to 0-1 range for consistent thresholding
+  normalized_breaks <- (valid_breaks - min_val) / (max_val - min_val)
+  
+  # Define thresholds and labels for each style
+  style_config <- switch(label_style,
+    "simple" = list(
+      thresholds = c(0.5),
+      labels = c("Low", "High")
+    ),
+    "standard" = list(
+      thresholds = c(0.33, 0.67),
+      labels = c("Low", "Medium", "High")
+    ),
+    "detailed" = list(
+      thresholds = c(0.2, 0.4, 0.6, 0.8),
+      labels = c("Very Low", "Low", "Medium", "High", "Very High")
+    ),
+    "biological" = list(
+      thresholds = c(0.1, 0.3, 0.6, 0.85),
+      labels = c("Negative", "Dim", "Intermediate", "Bright", "Very Bright")
+    ),
+    # Default to standard
+    list(
+      thresholds = c(0.33, 0.67),
+      labels = c("Low", "Medium", "High")
+    )
+  )
+  
+  # Assign labels based on thresholds
+  result_labels <- style_config$labels[length(style_config$labels)]  # Default to highest label
+  
+  for (i in length(style_config$thresholds):1) {
+    result_labels[normalized_breaks < style_config$thresholds[i]] <- style_config$labels[i]
+  }
+  
+  # Handle the case where we had NA values in original breaks
+  if (length(valid_breaks) < length(breaks)) {
+    # Pad result to match original length, filling NAs with empty strings
+    final_result <- character(length(breaks))
+    final_result[!is.na(breaks)] <- result_labels
+    final_result[is.na(breaks)] <- ""
+    return(final_result)
+  }
+  
+  return(result_labels)
+}
+
+# Simple static legend labels
+getStaticQualitativeLabels <- function(label_style) {
+  switch(label_style,
+    "simple" = c("Low", "High"),
+    "standard" = c("Low", "Medium", "High"),
+    "detailed" = c("Very Low", "Low", "Medium", "High", "Very High"),
+    "biological" = c("Negative", "Dim", "Intermediate", "Bright", "Very Bright"),
+    # Default to standard
+    c("Low", "Medium", "High")
+  )
+}
+
+# Helper function to generate palette colors
+generatePaletteColors <- function(color_palette, n_colors) {
+  # Define palette configurations
+  palette_configs <- list(
+    # Viridis family - unlimited colors
+    "viridis" = list(func = viridis::viridis, unlimited = TRUE),
+    "plasma" = list(func = viridis::plasma, unlimited = TRUE),
+    "magma" = list(func = viridis::magma, unlimited = TRUE),
+    "inferno" = list(func = viridis::inferno, unlimited = TRUE),
+    
+    # RColorBrewer palettes - limited colors
+    "blues" = list(func = function(n) RColorBrewer::brewer.pal(n, "Blues"), max_colors = 9, min_colors = 3),
+    "reds" = list(func = function(n) RColorBrewer::brewer.pal(n, "Reds"), max_colors = 9, min_colors = 3),
+    "brewer_paired" = list(func = function(n) RColorBrewer::brewer.pal(n, "Paired"), max_colors = 12, min_colors = 3),
+    "brewer_brbg" = list(func = function(n) RColorBrewer::brewer.pal(n, "BrBG"), max_colors = 11, min_colors = 3)
+  )
+  
+  # Get palette config or default to viridis
+  config <- if (is.null(palette_configs[[color_palette]])) palette_configs[["viridis"]] else palette_configs[[color_palette]]
+  
+  # Handle unlimited color palettes (viridis family)
+  if (isTRUE(config$unlimited)) {
+    return(config$func(n_colors))
+  }
+  
+  # Handle limited color palettes (RColorBrewer)
+  min_colors <- config$min_colors
+  max_colors <- config$max_colors
+  
+  if (n_colors < min_colors) {
+    # Use minimum colors then subset
+    return(config$func(min_colors)[1:n_colors])
+  } else if (n_colors <= max_colors) {
+    # Perfect fit
+    return(config$func(n_colors))
+  } else {
+    # Need to recycle colors
+    base_colors <- config$func(max_colors)
+    return(rep_len(base_colors, n_colors))
+  }
+}
+
+# Helper function for discrete color scales
+getDiscreteColorScale <- function(color_palette) {
+  # Define discrete scale mappings
+  discrete_scales <- list(
+    "viridis" = scale_color_viridis_d(),
+    "plasma" = scale_color_viridis_d(option = "plasma"),
+    "magma" = scale_color_viridis_d(option = "magma"),
+    "inferno" = scale_color_viridis_d(option = "inferno"),
+    "blues" = scale_color_brewer(palette = "Blues"),
+    "reds" = scale_color_brewer(palette = "Reds"),
+    "brewer_paired" = scale_color_brewer(palette = "Paired"),
+    "brewer_brbg" = scale_color_brewer(palette = "BrBG")
+  )
+  
+  # Return specified scale or default to viridis
+  if (is.null(discrete_scales[[color_palette]])) discrete_scales[["viridis"]] else discrete_scales[[color_palette]]
+}
+
+# Enhanced color scale with qualitative labels
 getQualitativeColorScale <- function(color_palette, name, option_type = "color", 
                                    use_qualitative_labels = TRUE, label_style = "standard") {
   
-  # Get the base viridis option
-  option <- switch(color_palette,
-                   "plasma" = "plasma",
-                   "viridis" = "viridis", 
-                   "magma" = "magma",
-                   "inferno" = "inferno",
-                   "plasma")  # default
+  # Get the base viridis option with lookup table
+  viridis_options <- c("plasma" = "plasma", "viridis" = "viridis", 
+                       "magma" = "magma", "inferno" = "inferno")
+  option <- if (is.na(viridis_options[color_palette])) "plasma" else viridis_options[color_palette]
+  
+  # Create base scale configuration
+  base_config <- list(name = name, option = option)
   
   if (use_qualitative_labels) {
-    # Define label sets for different styles
-    labels_and_breaks <- switch(label_style,
-      "simple" = list(
-        breaks = c(0, 1),
-        labels = c("Low", "High")
-      ),
-      "standard" = list(
-        breaks = c(0, 0.5, 1),
-        labels = c("Low", "Medium", "High")
-      ),
-      "detailed" = list(
-        breaks = c(0, 0.25, 0.5, 0.75, 1),
-        labels = c("Very Low", "Low", "Medium", "High", "Very High")
-      ),
-      "biological" = list(
-        breaks = c(0, 0.2, 0.4, 0.7, 1),
-        labels = c("Negative", "Dim", "Intermediate", "Bright", "Very Bright")
-      ),
-      # Default to standard
-      list(
-        breaks = c(0, 0.5, 1),
-        labels = c("Low", "Medium", "High")
+    # Add qualitative label function to base config
+    base_config$labels <- function(breaks) generateQualitativeLabels(breaks, label_style)
+    base_config$guide <- guide_colorbar(title.position = "top", title.hjust = 0.5)
+  }
+  
+  # Apply appropriate scale function based on type
+  scale_functions <- list(
+    "color" = scale_color_viridis_c,
+    "fill" = scale_fill_viridis_c,
+    "fill_discrete" = scale_fill_viridis_d
+  )
+  
+  if (option_type %in% names(scale_functions)) {
+    # For discrete fill, remove the labels function as it's not applicable
+    if (option_type == "fill_discrete") {
+      base_config <- base_config[c("name", "option")]
+    }
+    return(do.call(scale_functions[[option_type]], base_config))
+  }
+  
+  # Fallback to color scale
+  return(do.call(scale_color_viridis_c, base_config[c("name", "option")]))
+}
+
+# Simple static qualitative scale - FIXED: Use only min/max breaks
+getStaticQualitativeColorScale <- function(color_palette, name, option_type = "color", label_style = "standard") {
+  # Get the base viridis option
+  viridis_options <- c("plasma" = "plasma", "viridis" = "viridis", 
+                       "magma" = "magma", "inferno" = "inferno")
+  option <- if (is.na(viridis_options[color_palette])) "plasma" else viridis_options[color_palette]
+  
+  # Define min/max label pairs for each style
+  label_pairs <- switch(label_style,
+    "simple" = c("Low", "High"),
+    "standard" = c("Low", "High"),
+    "detailed" = c("Very Low", "Very High"), 
+    "biological" = c("Negative", "Very Bright"),
+    "blank" = c("", ""),
+    c("Low", "High")  # Default
+  )
+  
+  # Create scale with explicit min/max breaks only
+  if (option_type == "color") {
+    return(
+      scale_color_viridis_c(
+        name = name,
+        option = option,
+        breaks = function(limits) c(limits[1], limits[2]),  # Just min and max
+        labels = label_pairs,
+        guide = guide_colorbar(title.position = "top", title.hjust = 0.5)
       )
     )
-    
-    # Use qualitative labels for consistent appearance
-    if (option_type == "color") {
-      return(
-        scale_color_viridis_c(
-          name = name, 
-          option = option,
-          breaks = labels_and_breaks$breaks,
-          labels = labels_and_breaks$labels,
-          limits = c(0, 1),
-          oob = scales::squish,
-          guide = guide_colorbar(title.position = "top", title.hjust = 0.5)
-        )
+  } else if (option_type == "fill") {
+    return(
+      scale_fill_viridis_c(
+        name = name,
+        option = option,
+        breaks = function(limits) c(limits[1], limits[2]),  # Just min and max
+        labels = label_pairs,
+        guide = guide_colorbar(title.position = "top", title.hjust = 0.5)
       )
-    } else if (option_type == "fill") {
-      return(
-        scale_fill_viridis_c(
-          name = name, 
-          option = option,
-          breaks = labels_and_breaks$breaks,
-          labels = labels_and_breaks$labels,
-          limits = c(0, 1),
-          oob = scales::squish,
-          guide = guide_colorbar(title.position = "top", title.hjust = 0.5)
-        )
-      )
-    } else if (option_type == "fill_discrete") {
-      return(scale_fill_viridis_d(name = name, option = option))
-    }
-  } else {
-    # Original numerical labels
-    if (option_type == "color") {
-      return(scale_color_viridis_c(name = name, option = option))
-    } else if (option_type == "fill") {
-      return(scale_fill_viridis_c(name = name, option = option))
-    } else if (option_type == "fill_discrete") {
-      return(scale_fill_viridis_d(name = name, option = option))
-    }
+    )
+  } else if (option_type == "fill_discrete") {
+    return(scale_fill_viridis_d(name = name, option = option))
   }
+  
+  # Fallback
+  return(scale_color_viridis_c(name = name, option = option))
 }
 
 # Enhanced helper function to apply color palette with qualitative legend option
 applyColorPalette <- function(plot_obj, color_palette, marker_name, scale_type = "color",
-                             use_qualitative_labels = TRUE, label_style = "standard") {
-  if (scale_type == "color") {
-    return(plot_obj + getQualitativeColorScale(color_palette, marker_name, "color", use_qualitative_labels, label_style))
-  } else if (scale_type == "fill") {
-    return(plot_obj + getQualitativeColorScale(color_palette, marker_name, "fill", use_qualitative_labels, label_style))
-  } else if (scale_type == "both") {
+                             use_qualitative_labels = TRUE, label_style = "standard", static_labels = FALSE) {
+  
+  # Choose between static and dynamic labeling approach
+  if (use_qualitative_labels && static_labels) {
+    # Use static labels for heatmaps to avoid NA issues
+    if (scale_type == "color") {
+      return(plot_obj + getStaticQualitativeColorScale(color_palette, marker_name, "color", label_style))
+    } else if (scale_type == "fill") {
+      return(plot_obj + getStaticQualitativeColorScale(color_palette, marker_name, "fill", label_style))
+    }
+  } else {
+    # Use dynamic labels for other plots
+    if (scale_type == "color") {
+      return(plot_obj + getQualitativeColorScale(color_palette, marker_name, "color", use_qualitative_labels, label_style))
+    } else if (scale_type == "fill") {
+      return(plot_obj + getQualitativeColorScale(color_palette, marker_name, "fill", use_qualitative_labels, label_style))
+    }
+  }
+  
+  if (scale_type == "both") {
     # For contour plots that need both color and fill
-    return(plot_obj + 
-           getQualitativeColorScale(color_palette, paste(marker_name, "Points"), "color", use_qualitative_labels, label_style) +
-           getViridisColorScale(color_palette, paste(marker_name, "Level"), "fill_discrete"))  # Keep discrete for contours
+    if (use_qualitative_labels && static_labels) {
+      return(plot_obj + 
+             getStaticQualitativeColorScale(color_palette, paste(marker_name, "Points"), "color", label_style) +
+             getViridisColorScale(color_palette, paste(marker_name, "Level"), "fill_discrete"))
+    } else {
+      return(plot_obj + 
+             getQualitativeColorScale(color_palette, paste(marker_name, "Points"), "color", use_qualitative_labels, label_style) +
+             getViridisColorScale(color_palette, paste(marker_name, "Level"), "fill_discrete"))
+    }
   }
 }
 
@@ -144,24 +301,7 @@ createDimReductionPlot <- function(plot_data, dim1, dim2, colorBy = NULL,
       geom_point(aes(color = Cluster), alpha = 0.7, size = point_size/2) +
       labs(title = title, x = xlab, y = ylab, color = "Cluster")
     
-    # Apply appropriate color palette
-    if (color_palette == "viridis") {
-      p <- p + scale_color_viridis_d()
-    } else if (color_palette == "plasma") {
-      p <- p + scale_color_viridis_d(option = "plasma")
-    } else if (color_palette == "magma") {
-      p <- p + scale_color_viridis_d(option = "magma")
-    } else if (color_palette == "inferno") {
-      p <- p + scale_color_viridis_d(option = "inferno")
-    } else if (color_palette == "blues") {
-      p <- p + scale_color_brewer(palette = "Blues")
-    } else if (color_palette == "reds") {
-      p <- p + scale_color_brewer(palette = "Reds")
-    } else if (color_palette == "brewer_paired") {
-      p <- p + scale_color_brewer(palette = "Paired")
-    } else if (color_palette == "brewer_brbg") {
-      p <- p + scale_color_brewer(palette = "BrBG")
-    }
+    p <- p + getDiscreteColorScale(color_palette)
   }
   else {
     # No coloring
@@ -443,89 +583,10 @@ createMarkerExpressionPlot <- function(plot_data, marker, color_palette = "virid
       panel.grid.minor = element_blank()
     )
   
-  # Get the number of clusters to properly handle color palette expansion
+  # Generate appropriate palette with a unified function
   n_clusters <- length(unique(plot_data$Cluster))
-  
-  # Generate appropriate palette with enough colors
-  if (color_palette == "viridis") {
-    # Generate exactly as many colors as needed with viridis
-    palette_colors <- viridis::viridis(n_clusters)
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else if (color_palette == "plasma") {
-    # Generate exactly as many colors as needed with plasma
-    palette_colors <- viridis::plasma(n_clusters)
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else if (color_palette == "magma") {
-    # Generate exactly as many colors as needed with magma
-    palette_colors <- viridis::magma(n_clusters)
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else if (color_palette == "inferno") {
-    # Generate exactly as many colors as needed with inferno
-    palette_colors <- viridis::inferno(n_clusters)
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else if (color_palette == "blues") {
-    # Blues only has 9 colors max, so we need to handle expansion
-    max_blues <- 9
-    min_colors <- 3 # RColorBrewer requires minimum 3 colors
-    
-    if (n_clusters < min_colors) {
-      # If fewer than minimum, get minimum then take what we need
-      palette_colors <- RColorBrewer::brewer.pal(min_colors, "Blues")[1:n_clusters]
-    } else if (n_clusters <= max_blues) {
-      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "Blues")
-    } else {
-      # Get max colors then recycle
-      palette_colors <- RColorBrewer::brewer.pal(max_blues, "Blues")
-      palette_colors <- rep_len(palette_colors, n_clusters)
-    }
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else if (color_palette == "reds") {
-    # Reds only has 9 colors max
-    max_reds <- 9
-    min_colors <- 3 # RColorBrewer requires minimum 3 colors
-    
-    if (n_clusters < min_colors) {
-      palette_colors <- RColorBrewer::brewer.pal(min_colors, "Reds")[1:n_clusters]
-    } else if (n_clusters <= max_reds) {
-      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "Reds")
-    } else {
-      palette_colors <- RColorBrewer::brewer.pal(max_reds, "Reds")
-      palette_colors <- rep_len(palette_colors, n_clusters)
-    }
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else if (color_palette == "brewer_paired") {
-    # Paired has 12 colors max
-    max_paired <- 12
-    min_colors <- 3
-    
-    if (n_clusters < min_colors) {
-      palette_colors <- RColorBrewer::brewer.pal(min_colors, "Paired")[1:n_clusters]
-    } else if (n_clusters <= max_paired) {
-      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "Paired")
-    } else {
-      palette_colors <- RColorBrewer::brewer.pal(max_paired, "Paired")
-      palette_colors <- rep_len(palette_colors, n_clusters)
-    }
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else if (color_palette == "brewer_brbg") {
-    # BrBG has 11 colors max
-    max_brbg <- 11
-    min_colors <- 3
-    
-    if (n_clusters < min_colors) {
-      palette_colors <- RColorBrewer::brewer.pal(min_colors, "BrBG")[1:n_clusters]
-    } else if (n_clusters <= max_brbg) {
-      palette_colors <- RColorBrewer::brewer.pal(n_clusters, "BrBG")
-    } else {
-      palette_colors <- RColorBrewer::brewer.pal(max_brbg, "BrBG")
-      palette_colors <- rep_len(palette_colors, n_clusters)
-    }
-    p <- p + scale_fill_manual(values = palette_colors)
-  } else {
-    # Default to viridis if unrecognized palette
-    palette_colors <- viridis::viridis(n_clusters)
-    p <- p + scale_fill_manual(values = palette_colors)
-  }
+  palette_colors <- generatePaletteColors(color_palette, n_clusters)
+  p <- p + scale_fill_manual(values = palette_colors)
   
   return(p)
 }
@@ -550,17 +611,7 @@ get_standard_theme <- function(font_size = 12) {
 
 # Function to get the appropriate color scale based on palette name
 get_color_palette <- function(palette_name) {
-  switch(palette_name,
-         "viridis" = scale_color_viridis_d(),
-         "plasma" = scale_color_viridis_d(option = "plasma"),
-         "magma" = scale_color_viridis_d(option = "magma"),
-         "inferno" = scale_color_viridis_d(option = "inferno"),
-         "blues" = scale_color_brewer(palette = "Blues"),
-         "reds" = scale_color_brewer(palette = "Reds"),
-         "brewer_paired" = scale_color_brewer(palette = "Paired"),
-         "brewer_brbg" = scale_color_brewer(palette = "BrBG"),
-         scale_color_viridis_d() # Default to viridis
-  )
+  getDiscreteColorScale(palette_name)
 }
 
 # Spillover compensation plotting functions
@@ -687,7 +738,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
         coord_fixed()
       
       # Apply color palette for scatter
-      p <- applyColorPalette(p, color_palette, marker, "color")
+      p <- applyColorPalette(p, color_palette, marker, "color", TRUE, "standard", static_labels = TRUE)
       
     } else {
       # Sufficient data for binning
@@ -700,7 +751,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
           coord_fixed()
         
             # Apply color palette with user-specified legend style
-    p <- applyColorPalette(p, color_palette, marker, "fill", use_qualitative_labels, label_style)
+    p <- applyColorPalette(p, color_palette, marker, "fill", use_qualitative_labels, label_style, static_labels = TRUE)
         
       }, error = function(e) {
         # If binning fails, fall back to scatter plot
@@ -713,7 +764,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
           coord_fixed()
         
         # Apply color palette for scatter fallback
-        p <- applyColorPalette(p, color_palette, marker, "color")
+        p <- applyColorPalette(p, color_palette, marker, "color", TRUE, "standard", static_labels = TRUE)
         
         return(p)
       })
@@ -729,7 +780,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
       coord_fixed()
     
     # Apply color palette with user-specified legend style
-    p <- applyColorPalette(p, color_palette, marker, "color", use_qualitative_labels, label_style)
+    p <- applyColorPalette(p, color_palette, marker, "color", use_qualitative_labels, label_style, static_labels = TRUE)
       
   } else if (method == "contour") {
     # Filled contours based on marker expression - with error handling
@@ -749,7 +800,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
         coord_fixed()
       
       # Apply color palette for scatter
-      p <- applyColorPalette(p, color_palette, marker, "color")
+      p <- applyColorPalette(p, color_palette, marker, "color", TRUE, "standard", static_labels = TRUE)
       
     } else {
       # Sufficient data for contours
@@ -763,7 +814,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
           coord_fixed()
         
             # Apply color palettes with user-specified legend style
-    p <- applyColorPalette(p, color_palette, marker, "both", use_qualitative_labels, label_style)
+    p <- applyColorPalette(p, color_palette, marker, "both", use_qualitative_labels, label_style, static_labels = TRUE)
         
       }, error = function(e) {
         # If contour generation fails, fall back to scatter plot
@@ -776,7 +827,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
           coord_fixed()
         
         # Apply color palette for scatter fallback
-        p <- applyColorPalette(p, color_palette, marker, "color")
+        p <- applyColorPalette(p, color_palette, marker, "color", TRUE, "standard", static_labels = TRUE)
         
         return(p)
       })
@@ -792,7 +843,7 @@ createMarkerExpressionHeatmap <- function(plot_data, marker, dim1 = "tsne1", dim
       coord_fixed()
     
     # Apply color palette with user-specified legend style
-    p <- applyColorPalette(p, color_palette, marker, "color", use_qualitative_labels, label_style)
+    p <- applyColorPalette(p, color_palette, marker, "color", use_qualitative_labels, label_style, static_labels = TRUE)
   }
   
   # Apply enhanced theme
