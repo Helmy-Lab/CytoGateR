@@ -953,7 +953,9 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
         
         # Apply transformations (logicle for fluorescent channels)
         channels <- colnames(gs)
-        fluor_channels <- channels[!grepl("FSC|SSC|Time|Width|Height", channels, ignore.case = TRUE)]
+        # Only exclude scatter parameters and technical parameters for transformation
+        # Time and viability dyes (AViD, Live/Dead, etc.) should be available for gating
+        fluor_channels <- channels[!grepl("FSC|SSC|Width|Height", channels, ignore.case = TRUE)]
         
         if (length(fluor_channels) > 0) {
           # Create logicle transformations
@@ -987,11 +989,16 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
         updateSelectInput(session, "sample_select",
                           choices = sampleNames(gs))
         
-        # Update channel choices - separate fluorescent and scatter channels
+        # Update channel choices - categorize channels properly for gating
         scatter_channels <- channels[grepl("FSC|SSC", channels, ignore.case = TRUE)]
-        fluor_channels <- channels[!grepl("FSC|SSC|Time|Width|Height", channels, ignore.case = TRUE)]
+        time_channels <- channels[grepl("Time", channels, ignore.case = TRUE)]
+        viability_channels <- channels[grepl("AViD|Live|Dead|PI|7AAD|DAPI|Propidium|Zombie|Ghost", channels, ignore.case = TRUE)]
+        other_channels <- channels[!grepl("FSC|SSC|Width|Height", channels, ignore.case = TRUE)]
         
-        all_channels <- c(scatter_channels, fluor_channels)
+        # Combine all channels available for gating - prioritize by typical usage
+        all_channels <- c(scatter_channels, time_channels, viability_channels, other_channels)
+        # Remove duplicates while preserving order
+        all_channels <- unique(all_channels)
         
         # Set default selections for better user experience
         default_x <- if (length(scatter_channels) >= 1) scatter_channels[1] else all_channels[1]

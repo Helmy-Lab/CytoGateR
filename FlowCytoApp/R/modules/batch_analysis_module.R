@@ -85,12 +85,12 @@ batchAnalysisModuleUI <- function(id) {
             )
           ),
           
-          # Advanced Preprocessing Section
+          # Preprocessing Section
           shinydashboard::box(
-            title = "Advanced Preprocessing", status = "warning", solidHeader = TRUE,
+            title = "Preprocessing", status = "warning", solidHeader = TRUE,
             width = 12, collapsible = TRUE, collapsed = TRUE,
             
-            checkboxInput(ns("showBatchPreprocessing"), "Enable Advanced Preprocessing", value = FALSE),
+            checkboxInput(ns("showBatchPreprocessing"), "Enable Preprocessing", value = FALSE),
             
             # Replace conditionalPanel with server-side rendering
             uiOutput(ns("advancedPreprocessingUI"))
