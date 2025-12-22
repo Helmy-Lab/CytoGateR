@@ -6,13 +6,27 @@ source("global.R")
 
 # Define UI
 ui <- navbarPage(
-  # Add theme and include custom CSS
   theme = shinytheme("flatly"),
-  includeCSS("www/custom.css"),
-  includeScript("www/custom.js"), # Add the custom JavaScript
   
-  # Add a custom CSS style tag to set initial font sizes
-  tags$head(
+  # Application header with logos
+  title = div(
+    class = "app-header-brand",
+    tags$img(
+      src = "cytogater_logo.png",
+      class = "header-logo header-logo-left",
+      alt = "CytoGateR logo"
+    ),
+    tags$img(
+      src = "vido_bioinfo_logo.png",
+      class = "header-logo header-logo-right",
+      alt = "VIDO Bioinformatics logo"
+    )
+  ),
+  
+  # Head content (styles and scripts) stays out of the tab list
+  header = tagList(
+    includeCSS("www/custom.css"),
+    includeScript("www/custom.js"),
     tags$style(HTML("
       /* Initial font size variables */
       :root {
@@ -27,9 +41,6 @@ ui <- navbarPage(
       }
     "))
   ),
-  
-  # Application title
-  title = "CytoGateR",
   
   # Tab for the Settings Module
   tabPanel("Settings", 
