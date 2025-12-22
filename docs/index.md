@@ -22,25 +22,25 @@ permalink: /
 ## Quick Navigation
 
 <div class="code-example" markdown="1">
-### 🚀 [Getting Started]({% link getting-started.md %})
+### 🚀 [Getting Started]({{ '/getting-started.html' | relative_url }})
 Set up CytoGateR and learn the basics
 
-### ⚙️ [Settings]({% link settings.md %})
+### ⚙️ [Settings]({{ '/settings.html' | relative_url }})
 Configure global plot preferences
 
-### 🔧 [Spillover Compensation]({% link compensation.md %})
+### 🔧 [Spillover Compensation]({{ '/compensation.html' | relative_url }})
 Remove fluorophore spillover
 
-### 🎯 [Interactive Gating]({% link gating.md %})
+### 🎯 [Interactive Gating]({{ '/gating.html' | relative_url }})
 Define cell populations
 
-### 📊 [Raw Data Analysis]({% link raw-data.md %})
+### 📊 [Raw Data Analysis]({{ '/raw-data.html' | relative_url }})
 Process and analyze raw flow cytometry data
 
-### ⚡ [Batch Analysis]({% link batch-analysis.md %})
+### ⚡ [Batch Analysis]({{ '/batch-analysis.html' | relative_url }})
 Process multiple samples simultaneously
 
-### 📈 [Processed Data]({% link processed-data.md %})
+### 📈 [Processed Data]({{ '/processed-data.html' | relative_url }})
 Advanced visualization and analysis
 </div>
 
