@@ -945,7 +945,6 @@ rawDataModuleServer <- function(id, app_state) {
       markers <- processedData()$markers
       current_mappings <- markerNameMappings()
       
-      # Create input fields for each marker
       marker_inputs <- lapply(seq_along(markers), function(i) {
         marker <- markers[i]
         current_display <- getMarkerDisplayName(marker, current_mappings)
@@ -954,17 +953,17 @@ rawDataModuleServer <- function(id, app_state) {
           style = "margin-bottom: 10px; padding: 10px; border: 1px solid #dee2e6; border-radius: 4px; background-color: #f8f9fa;",
           fluidRow(
             column(5,
-              strong("Technical Name:"),
-              br(),
-              code(marker, style = "background-color: #e9ecef; padding: 2px 4px; border-radius: 3px;")
+                   strong("Technical Name:"),
+                   br(),
+                   code(marker, style = "background-color: #e9ecef; padding: 2px 4px; border-radius: 3px;")
             ),
             column(7,
-              textInput(
-                inputId = session$ns(paste0("marker_display_", i)),
-                label = "Display Name:",
-                value = current_display,
-                placeholder = "Enter friendly name..."
-              )
+                   textInput(
+                     inputId = session$ns(paste0("marker_display_", i)),
+                     label = "Display Name:",
+                     value = current_display,
+                     placeholder = "Enter friendly name..."
+                   )
             )
           )
         )
@@ -980,7 +979,7 @@ rawDataModuleServer <- function(id, app_state) {
           icon("info-circle"),
           strong(" Instructions: "),
           "Enter friendly names for your markers. Leave blank to use the technical name. ",
-          "Examples: FL1-A → CD3, FL2-A → CD4, FJComp-FL1-A → CD8, etc."
+          "Examples: FL1-A -> CD3, FL2-A -> CD4, FJComp-FL1-A -> CD8, etc."
         ),
         
         div(
@@ -989,17 +988,17 @@ rawDataModuleServer <- function(id, app_state) {
         ),
         
         footer = tagList(
-          actionButton(session$ns("resetMarkerNames"), "Reset All", 
-                      class = "btn-warning", icon = icon("undo")),
-          downloadButton(session$ns("downloadMarkerMappings"), "Export Mappings", 
-                        class = "btn-secondary", icon = icon("download")),
-          fileInput(session$ns("uploadMarkerMappings"), NULL, 
-                   buttonLabel = "Import Mappings", 
-                   accept = c(".csv"),
-                   placeholder = "CSV file"),
+          actionButton(session$ns("resetMarkerNames"), "Reset All",
+                       class = "btn-warning", icon = icon("undo")),
+          downloadButton(session$ns("downloadMarkerMappings"), "Export Mappings",
+                         class = "btn-secondary", icon = icon("download")),
+          fileInput(session$ns("uploadMarkerMappings"), NULL,
+                    buttonLabel = "Import Mappings",
+                    accept = c(".csv"),
+                    placeholder = "CSV file"),
           modalButton("Cancel"),
-          actionButton(session$ns("saveMarkerNames"), "Save Changes", 
-                      class = "btn-success", icon = icon("save"))
+          actionButton(session$ns("saveMarkerNames"), "Save Changes",
+                       class = "btn-success", icon = icon("save"))
         )
       ))
     })
@@ -1009,144 +1008,88 @@ rawDataModuleServer <- function(id, app_state) {
       req(processedData())
       markers <- processedData()$markers
       
-      # Collect all the new names
       new_mappings <- list()
       for (i in seq_along(markers)) {
-        marker <- markers[i]
+        marker   <- markers[i]
         input_id <- paste0("marker_display_", i)
         new_name <- input[[input_id]]
         
         if (!is.null(new_name) && trimws(new_name) != "") {
           new_mappings[[marker]] <- trimws(new_name)
         } else {
-          new_mappings[[marker]] <- marker  # Use technical name if no display name
+          new_mappings[[marker]] <- marker
         }
       }
       
-      # Update the mappings
       markerNameMappings(new_mappings)
-      
       removeModal()
       showNotification("Marker names updated successfully!", type = "message", duration = 3)
     })
     
-    # Reset marker names
+    # Reset all marker names to technical names
     observeEvent(input$resetMarkerNames, {
       markerNameMappings(list())
       removeModal()
       showNotification("All marker names reset to technical names", type = "message", duration = 3)
     })
     
-    # Download marker mappings
+    # Export marker name mappings as CSV
     output$downloadMarkerMappings <- downloadHandler(
       filename = function() {
         paste0("marker_mappings_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
       },
       content = function(file) {
         mappings <- markerNameMappings()
-        if (length(mappings) == 0) {
-          # Create empty file with headers
-          mapping_df <- data.frame(
-            TechnicalName = character(0),
-            DisplayName = character(0),
-            stringsAsFactors = FALSE
-          )
+        mapping_df <- if (length(mappings) == 0) {
+          data.frame(TechnicalName = character(0), DisplayName = character(0),
+                     stringsAsFactors = FALSE)
         } else {
-          # Create data frame from mappings
-          mapping_df <- data.frame(
-            TechnicalName = names(mappings),
-            DisplayName = unlist(mappings),
-            stringsAsFactors = FALSE
-          )
+          data.frame(TechnicalName = names(mappings), DisplayName = unlist(mappings),
+                     stringsAsFactors = FALSE)
         }
         write.csv(mapping_df, file, row.names = FALSE)
       }
     )
     
-    # Upload marker mappings
+    # Import marker name mappings from CSV
     observeEvent(input$uploadMarkerMappings, {
       req(input$uploadMarkerMappings)
       
       tryCatch({
-        # Read the CSV file
         mapping_df <- read.csv(input$uploadMarkerMappings$datapath, stringsAsFactors = FALSE)
         
-        # Validate the CSV structure
         if (!all(c("TechnicalName", "DisplayName") %in% colnames(mapping_df))) {
-          showNotification("CSV file must have 'TechnicalName' and 'DisplayName' columns", 
-                          type = "error", duration = 5)
+          showNotification("CSV must have 'TechnicalName' and 'DisplayName' columns",
+                           type = "error", duration = 5)
           return()
         }
         
-        # Convert to list format
-        new_mappings <- setNames(
-          as.list(mapping_df$DisplayName),
-          mapping_df$TechnicalName
-        )
-        
-        # Update the mappings
-        markerNameMappings(new_mappings)
-        
-      showNotification(
-          paste("Successfully imported", nrow(mapping_df), "marker mappings"), 
-          type = "message", duration = 3
-        )
+        markerNameMappings(setNames(as.list(mapping_df$DisplayName), mapping_df$TechnicalName))
+        showNotification(paste("Imported", nrow(mapping_df), "marker mappings"),
+                         type = "message", duration = 3)
         
       }, error = function(e) {
-        showNotification(
-          paste("Error reading mappings file:", e$message), 
-          type = "error", duration = 5
-        )
+        showNotification(paste("Error reading mappings file:", e$message),
+                         type = "error", duration = 5)
       })
     })
     
-    # # Compensation analysis UI
-    # output$compensationAnalysisUI <- renderUI({
-    #   if (isTRUE(input$enableCompensation)) {
-    #     tagList(
-    #       fluidRow(
-    #         column(6,
-    #                shinydashboard::box(
-    #                  title = "Spillover Matrix", status = "info", solidHeader = TRUE,
-    #                  width = 12,
-    #                  DT::dataTableOutput(session$ns("spilloverMatrixTable"))
-    #                )
-    #         ),
-    #         column(6,
-    #                shinydashboard::box(
-    #                  title = "Compensation Effects", status = "success", solidHeader = TRUE,
-    #                  width = 12,
-    #                  plotOutput(session$ns("compensationEffectsPlot"), height = "400px")
-    #                )
-    #         )
-    #       ),
-    #       shinydashboard::box(
-    #         title = "Before vs After Compensation", status = "primary", solidHeader = TRUE,
-    #         width = 12,
-    #         plotOutput(session$ns("beforeAfterCompensationPlot"), height = "500px")
-    #       )
-    #     )
-    #   } else {
-    #     div(class = "alert alert-info", style = "margin: 15px;",
-    #         icon("info-circle"), 
-    #         h5("Spillover Compensation Disabled"),
-    #         p("Enable spillover compensation in the sidebar to view compensation analysis.")
-    #     )
-    #   }
-    # })
+    # ============================================================================
+    # SERVER-SIDE CONDITIONAL UI RENDERING
+    # ============================================================================
     
-    # Live/Dead controls UI
+    # Live/Dead threshold controls
     output$liveDeadControlsUI <- renderUI({
       if (!is.null(input$liveDeadMarkerSelect) && input$liveDeadMarkerSelect != "None") {
         tagList(
-          sliderInput(session$ns("liveDeadThresholdSlider"), "Threshold", 
+          sliderInput(session$ns("liveDeadThresholdSlider"), "Threshold",
                       min = 0, max = 5000, value = 1000, step = 100),
           checkboxInput(session$ns("useLogScale"), "Use Log Scale for Visualization", value = TRUE)
         )
       }
     })
     
-    # Live/Dead scatter UI
+    # Live/Dead scatter plot display
     output$liveDeadScatterUI <- renderUI({
       if (!is.null(input$liveDeadMarkerSelect) && input$liveDeadMarkerSelect != "None") {
         shinydashboard::box(
@@ -1157,28 +1100,29 @@ rawDataModuleServer <- function(id, app_state) {
       }
     })
     
-    # Cluster analysis UI
+    # Cluster analysis results panel
     output$clusterAnalysisUI <- renderUI({
-      if (!is.null(input[["clustering-showClusteringOptions"]]) && input[["clustering-showClusteringOptions"]]) {
+      if (!is.null(input[["clustering-showClusteringOptions"]]) &&
+          input[["clustering-showClusteringOptions"]]) {
         tabsetPanel(
-          tabPanel("Cluster Visualization", 
+          tabPanel("Cluster Visualization",
                    br(),
                    div(style = "position: relative;",
                        plotlyOutput(session$ns("clusterPlot"), height = "600px"))
           ),
-          tabPanel("Cluster Profiles", 
+          tabPanel("Cluster Profiles",
                    br(),
                    shinycssloaders::withSpinner(plotOutput(session$ns("clusterHeatmap")))),
-          tabPanel("Cluster Statistics", 
+          tabPanel("Cluster Statistics",
                    br(),
                    DT::dataTableOutput(session$ns("clusterStats"))),
-          tabPanel("Identified Populations", 
+          tabPanel("Identified Populations",
                    br(),
                    DT::dataTableOutput(session$ns("populationTable")))
         )
       } else {
         div(class = "alert alert-info", style = "margin: 15px;",
-            icon("info-circle"), 
+            icon("info-circle"),
             h5("Clustering Analysis Disabled"),
             p("Enable clustering analysis in the sidebar to view cluster results.")
         )
@@ -1189,477 +1133,311 @@ rawDataModuleServer <- function(id, app_state) {
     # END OF SERVER-SIDE CONDITIONAL UI RENDERING
     # ============================================================================
     
-    # Run analysis when button is clicked
+    # ============================================================================
+    # MAIN ANALYSIS — ASYNC (Change 2)
+    # ============================================================================
+    
+    # Analysis is triggered explicitly by the Run button.
+    # Heavy computation (t-SNE, UMAP, PCA, MDS) runs inside future_promise() so
+    # the R session remains responsive during processing. Shiny drops connections
+    # after ~90s of unresponsive session; the previous synchronous withProgress()
+    # block was the direct cause of server disconnections.
+    #
+    # IMPORTANT: all input$* values must be captured as local variables BEFORE
+    # entering future_promise(). Shiny inputs are not accessible inside the async
+    # worker process — reading them there returns NULL silently.
     observeEvent(input$run, {
       req(input$selectedMarkers)
       
-      withProgress(message = 'Processing data...', value = 0, {
-        # Get data
-        raw_data <- rawFCS()
-        
-        # Prepare preprocessing parameters
-        preprocessing_params <- list(
-          markers = input$selectedMarkers,
-          transform = input$transform,
-          cofactor = input$cofactor,
-          n_events = input$nEvents,
-          perform_qc = isTRUE(input$performQC),
-         
-          perform_gating = FALSE,  # Disabled - using dedicated gating module
-          # perform_compensation = isTRUE(input$enableCompensation),
-          perform_compensation = FALSE,  
-          spillover_matrix = NULL,  
-          scale_data = TRUE,
-          seed = 123
+      # Pre-computation guard: warn before launching expensive algorithms
+      # on large datasets. Does not block — user can still proceed.
+      raw_data      <- rawFCS()
+      n_events_total <- if (inherits(raw_data, "flowFrame")) nrow(exprs(raw_data)) else nrow(raw_data)
+      
+      if (n_events_total > 50000) {
+        showNotification(
+          paste0("Large dataset: ", format(n_events_total, big.mark = ","),
+                 " events detected. Analysis may take several minutes."),
+          type = "warning", duration = 8
         )
+      }
+      
+      # Capture all inputs BEFORE entering async context
+      selected_markers <- input$selectedMarkers
+      methods          <- input$methods
+      do_transform     <- input$transform
+      cofactor         <- input$cofactor
+      n_events_sample  <- input$nEvents
+      perplexity       <- input$perplexity
+      use_bh           <- isTRUE(input$use_barnes_hut)
+      tsne_theta       <- if (use_bh) input$tsne_theta else 0.0
+      tsne_max_iter    <- input$tsne_max_iter
+      n_neighbors      <- input$n_neighbors
+      pca_components   <- input$pca_components
+      perform_qc       <- isTRUE(input$performQC)
+      max_anomalies    <- input$maxAnomalies
+      
+      showNotification("Analysis running...", id = "run_msg", duration = NULL)
+      
+      # Runs in a separate R process (plan(multisession) set in global.R).
+      # The main Shiny session stays alive and responsive during computation.
+      # All objects referenced inside must be self-contained — no reactive reads.
+      future_promise({
         
-        # Add QC settings if QC is enabled
-        if (isTRUE(input$performQC)) {
-          preprocessing_params$qc_settings <- list(
-            max_anomalies = input$maxAnomalies / 100  # Convert from percentage to proportion
-          )
-        }
-        
-        
-        # Run preprocessing pipeline
-        incProgress(0.1, detail = "Preprocessing data...")
-        preprocessing_results <- preprocessFlowData(raw_data, preprocessing_params)
-        
-        # Run dimensionality reduction methods
-        results <- list(
-          raw_data = preprocessing_results$raw_data,
-          qc_data = preprocessing_results$qc_data,
-          gated_data = preprocessing_results$gated_data,
-          transformed_data = preprocessing_results$transformed_data,
-          sampled_data = preprocessing_results$sampled_data,
-          scaled_data = preprocessing_results$scaled_data,
-          metrics = preprocessing_results$metrics
-        )
-        
-        if ("t-SNE" %in% input$methods) {
-          incProgress(0.4, detail = "Running t-SNE...")
+        tryCatch({
           
-          # Ensure the data is a matrix
-          data_matrix <- as.matrix(preprocessing_results$scaled_data)
-          
-          # Prepare t-SNE parameters
-          tsne_params <- list(
-            dims = 2,
-            perplexity = input$perplexity,
-            max_iter = input$tsne_max_iter,
-            verbose = FALSE
+          preprocessing_params <- list(
+            markers              = selected_markers,
+            transform            = do_transform,
+            cofactor             = cofactor,
+            n_events             = n_events_sample,
+            perform_qc           = perform_qc,
+            perform_gating       = FALSE,
+            perform_compensation = FALSE,
+            spillover_matrix     = NULL,
+            scale_data           = TRUE,
+            seed                 = 123,
+            qc_settings          = if (perform_qc) list(max_anomalies = max_anomalies / 100) else NULL
           )
           
-          if (input$use_barnes_hut) {
-            # Use Barnes-Hut t-SNE
-            tsne_params$theta <- input$tsne_theta
-            incProgress(0.1, detail = "Running Barnes-Hut t-SNE...")
-          } else {
-            # Use exact t-SNE (very slow for large datasets)
-            tsne_params$theta <- 0.0  # This triggers exact t-SNE
-            incProgress(0.1, detail = "Running exact t-SNE (may be slow)...")
+          preprocessing_results <- preprocessFlowData(raw_data, preprocessing_params)
+          
+          results <- list(
+            raw_data     = preprocessing_results$raw_data,
+            sampled_data = preprocessing_results$sampled_data,
+            scaled_data  = preprocessing_results$scaled_data,
+            metrics      = preprocessing_results$metrics,
+            markers      = selected_markers
+          )
+          
+          if ("t-SNE" %in% methods) {
+            set.seed(123)
+            data_matrix <- as.matrix(preprocessing_results$scaled_data)
+            tsne_out <- Rtsne::Rtsne(
+              data_matrix,
+              dims             = 2,
+              perplexity       = perplexity,
+              theta            = tsne_theta,
+              max_iter         = tsne_max_iter,
+              verbose          = FALSE,
+              check_duplicates = FALSE
+            )
+            results$tsne <- data.frame(tsne1 = tsne_out$Y[, 1], tsne2 = tsne_out$Y[, 2])
+            rm(tsne_out, data_matrix); gc(verbose = FALSE)
           }
           
-          # Run t-SNE with the configured parameters
-          tsne_result <- do.call(Rtsne, c(list(X = data_matrix), tsne_params))
+          if ("UMAP" %in% methods) {
+            set.seed(123)
+            umap_out <- uwot::umap(preprocessing_results$scaled_data, n_neighbors = n_neighbors)
+            results$umap <- data.frame(umap1 = umap_out[, 1], umap2 = umap_out[, 2])
+            rm(umap_out); gc(verbose = FALSE)
+          }
           
-          results$tsne <- data.frame(tsne1 = tsne_result$Y[,1], tsne2 = tsne_result$Y[,2])
+          if ("PCA" %in% methods) {
+            pca_out <- prcomp(preprocessing_results$scaled_data, center = TRUE, scale. = TRUE)
+            n_comp  <- min(pca_components, ncol(pca_out$x))
+            results$pca <- as.data.frame(pca_out$x[, 1:n_comp])
+            colnames(results$pca) <- paste0("pca", seq_len(n_comp))
+            results$pca_summary   <- summary(pca_out)
+            rm(pca_out); gc(verbose = FALSE)
+          }
           
-          # MEMORY OPTIMIZATION: Clear t-SNE intermediate objects immediately
-          tsne_result <- NULL
-          data_matrix <- NULL
-          tsne_params <- NULL
-          gc(verbose = FALSE)
-        }
-        
-        if ("UMAP" %in% input$methods) {
-          incProgress(0.7, detail = "Running UMAP...")
-          umap_result <- umap(preprocessing_results$scaled_data, n_neighbors = input$n_neighbors)
-          results$umap <- data.frame(umap1 = umap_result[,1], umap2 = umap_result[,2])
-          
-          # MEMORY OPTIMIZATION: Clear UMAP intermediate objects immediately
-          umap_result <- NULL
-          gc(verbose = FALSE)
-        }
-        
-        if ("PCA" %in% input$methods) {
-          incProgress(0.8, detail = "Running PCA...")
-          pca_result <- prcomp(preprocessing_results$scaled_data, center = TRUE, scale. = TRUE)
-          results$pca <- data.frame(pca1 = pca_result$x[,1], pca2 = pca_result$x[,2])
-          
-          # Store additional components if requested
-          if (input$pca_components > 2) {
-            for (i in 3:input$pca_components) {
-              results$pca[[paste0("pca", i)]] <- pca_result$x[, i]
+          if ("MDS" %in% methods) {
+            # Hard cap MDS at 5000 events — distance matrix is O(N^2) in memory.
+            # 50,000 events would require ~20GB RAM without this guard.
+            mds_mat <- preprocessing_results$scaled_data
+            if (nrow(mds_mat) > 5000) {
+              mds_mat <- mds_mat[sample(nrow(mds_mat), 5000), ]
             }
+            mds_out <- cmdscale(dist(mds_mat), k = 2)
+            results$mds <- data.frame(mds1 = mds_out[, 1], mds2 = mds_out[, 2])
+            rm(mds_out, mds_mat); gc(verbose = FALSE)
           }
           
-          # Store PCA summary information for metrics
-          results$pca_summary <- summary(pca_result)
+          results
           
-          # MEMORY OPTIMIZATION: Clear PCA intermediate objects immediately
-          pca_result <- NULL
-          gc(verbose = FALSE)
-        }
+        }, error = function(e) {
+          stop(paste("Computation error:", conditionMessage(e)))
+        })
         
-        if ("MDS" %in% input$methods) {
-          incProgress(0.9, detail = "Running MDS...")
-          data_matrix <- as.matrix(preprocessing_results$scaled_data)
-          dist_matrix <- dist(data_matrix)
-          mds_result <- cmdscale(dist_matrix, k = 2)
-          results$mds <- data.frame(mds1 = mds_result[,1], mds2 = mds_result[,2])
-          
-          # MEMORY OPTIMIZATION: Clear MDS intermediate objects immediately (these can be very large)
-          data_matrix <- NULL
-          dist_matrix <- NULL
-          mds_result <- NULL
-          gc(verbose = FALSE)
-        }
+        # Promise success handler — executes back on the main Shiny thread once the
+        # future completes. Only here is it safe to write to reactiveVal() and
+        # update the UI. Do not move reactive writes inside future_promise() above.
+      }) %...>% (function(results) {
         
-        # Create plot data
-        plot_data <- as.data.frame(preprocessing_results$sampled_data)
-        colnames(plot_data) <- input$selectedMarkers
+        plot_data <- as.data.frame(results$sampled_data)
+        colnames(plot_data) <- results$markers
         
-        # Add dimensionality reduction coordinates and clear each result immediately after use
         if (!is.null(results$tsne)) {
           plot_data$tsne1 <- results$tsne$tsne1
           plot_data$tsne2 <- results$tsne$tsne2
-          # MEMORY OPTIMIZATION: Clear t-SNE results after adding to plot_data
-          results$tsne <- NULL
-          gc(verbose = FALSE)
         }
-        
         if (!is.null(results$umap)) {
           plot_data$umap1 <- results$umap$umap1
           plot_data$umap2 <- results$umap$umap2
-          # MEMORY OPTIMIZATION: Clear UMAP results after adding to plot_data
-          results$umap <- NULL
-          gc(verbose = FALSE)
         }
-        
         if (!is.null(results$pca)) {
-          plot_data$pca1 <- results$pca$pca1
-          plot_data$pca2 <- results$pca$pca2
-          
-          # Add additional PCA components if they exist
-          if (input$pca_components > 2) {
-            for (i in 3:input$pca_components) {
-              pca_col <- paste0("pca", i)
-              if (pca_col %in% colnames(results$pca)) {
-                plot_data[[pca_col]] <- results$pca[[pca_col]]
-              }
-            }
-          }
-          # MEMORY OPTIMIZATION: Clear PCA results after adding to plot_data
-          results$pca <- NULL
-          gc(verbose = FALSE)
+          for (col in colnames(results$pca)) plot_data[[col]] <- results$pca[[col]]
         }
-        
         if (!is.null(results$mds)) {
           plot_data$mds1 <- results$mds$mds1
           plot_data$mds2 <- results$mds$mds2
-          # MEMORY OPTIMIZATION: Clear MDS results after adding to plot_data
-          results$mds <- NULL
-          gc(verbose = FALSE)
         }
         
         results$plot_data <- plot_data
-        results$markers <- input$selectedMarkers
         
-        # MEMORY OPTIMIZATION: Clear preprocessing intermediate data that's no longer needed
-        # Keep only essential results for downstream analysis
-        preprocessing_results$qc_data <- NULL
-        preprocessing_results$gated_data <- NULL
-        preprocessing_results$transformed_data <- NULL
-        # Keep sampled_data and scaled_data as they're needed for clustering
-        gc(verbose = FALSE)
-        
-        # CRITICAL: Preserve original flowSet for gating module compatibility
-        if (inherits(raw_data, "flowFrame")) {
-          # Convert single flowFrame to flowSet
-          results$raw_data <- flowSet(raw_data)
-        } else if (inherits(raw_data, "flowSet")) {
-          # Store original flowSet
-          results$raw_data <- raw_data  
+        # Preserve flowSet structure for downstream gating module compatibility
+        if (inherits(results$raw_data, "flowFrame")) {
+          results$raw_data <- flowSet(results$raw_data)
         }
         
         processedData(results)
+        removeNotification("run_msg")
         
-        # MEMORY OPTIMIZATION: Final cleanup after storing results
-        plot_data <- NULL
-        preprocessing_results <- NULL
-        gc(verbose = FALSE)
-        
-        # Display notification about preprocessing results
         if (!is.null(results$metrics)) {
           qc_removed <- round(results$metrics$qc$removed_pct * 100, 1)
-         
-          
-          msg <- paste0("Preprocessing complete: ", 
-                        
-                        qc_removed, "% removed in QC. ",
-                        # gating_removed, "% removed in gating. ",  
-                        "Analyzing ", nrow(results$sampled_data), " cells.")
-          
-          showNotification(msg, type = "message", duration = 5)
+          showNotification(
+            paste0("Analysis complete. QC removed ", qc_removed, "%. Analysing ",
+                   nrow(results$sampled_data), " cells."),
+            type = "message", duration = 5
+          )
+        } else {
+          showNotification("Analysis complete.", type = "message", duration = 4)
         }
+        
+        # Promise error handler — catches any error thrown inside future_promise()
+        # and surfaces it to the user. Without this, failures are silent and the
+        # loading spinner spins indefinitely with no feedback.
+      }) %...!% (function(err) {
+        removeNotification("run_msg")
+        showNotification(
+          paste("Analysis failed:", conditionMessage(err)),
+          type = "error", duration = 10
+        )
       })
     })
     
-    # Call clustering module server
-    clustering_results <- clusteringModuleServer("clustering", 
-                                                 # Pass data and markers to clustering module
-                                                 input_data = reactive({
-                                                   req(processedData())
-                                                   list(
-                                                     scaled_data = processedData()$scaled_data,
-                                                     markers = input$selectedMarkers
-                                                   )
-                                                 }),
-                                                 app_state = app_state
+    # ============================================================================
+    # CLUSTERING MODULE
+    # ============================================================================
+    
+    clustering_results <- clusteringModuleServer(
+      "clustering",
+      input_data = reactive({
+        req(processedData())
+        list(
+          scaled_data = processedData()$scaled_data,
+          markers     = input$selectedMarkers
+        )
+      }),
+      app_state = app_state
     )
     
-    # Add optimization metrics UI
+    # ============================================================================
+    # OPTIMIZATION METRICS
+    # ============================================================================
+    
     output$optimizationMetricsUI <- renderUI({
       req(processedData())
       
-      # Only show after analysis has been run
-      if (is.null(processedData())) {
-        return(NULL)
-      }
-      
-      # Calculate optimization metrics for dimensionality reduction methods
       results <- processedData()
       metrics <- list()
       
-      # Calculate metrics only for methods that were run
       if (!is.null(results$tsne)) {
-        # Calculate t-SNE metrics if it was run
-        tsne_data <- results$tsne
-        
-        # Calculate KL divergence (approximation)
-        # This is a simple approximation - actual KL would require access to t-SNE internals
         tsne_kl <- tryCatch({
-          # A rough proxy for quality - normalize and sum squared distances
-          original_dist <- dist(scale(results$scaled_data))
-          embedding_dist <- dist(as.matrix(tsne_data))
-          
-          # Normalize distances
-          original_dist <- original_dist / max(original_dist)
+          original_dist  <- dist(scale(results$scaled_data))
+          embedding_dist <- dist(as.matrix(results$tsne))
+          original_dist  <- original_dist  / max(original_dist)
           embedding_dist <- embedding_dist / max(embedding_dist)
-          
-          # Calculate a simple divergence measure
           mean((as.matrix(original_dist) - as.matrix(embedding_dist))^2)
         }, error = function(e) NA)
         
-        # Store t-SNE metrics
-        metrics$tsne <- list(
-          kl_divergence = round(tsne_kl, 4),
-          perplexity = input$perplexity
-        )
+        metrics$tsne <- list(kl_divergence = round(tsne_kl, 4), perplexity = input$perplexity)
       }
       
       if (!is.null(results$umap)) {
-        # Calculate UMAP metrics if it was run
-        umap_data <- results$umap
-        
-        # Calculate a simple metric for UMAP (trustworthiness approximation)
         umap_trust <- tryCatch({
-          # A rough proxy for quality - normalize and sum squared distances
-          original_dist <- dist(scale(results$scaled_data))
-          embedding_dist <- dist(as.matrix(umap_data))
-          
-          # Normalize distances
-          original_dist <- original_dist / max(original_dist)
+          original_dist  <- dist(scale(results$scaled_data))
+          embedding_dist <- dist(as.matrix(results$umap))
+          original_dist  <- original_dist  / max(original_dist)
           embedding_dist <- embedding_dist / max(embedding_dist)
-          
-          # Calculate correlation between distance matrices
           cor(as.vector(as.matrix(original_dist)), as.vector(as.matrix(embedding_dist)))
         }, error = function(e) NA)
         
-        # Store UMAP metrics
-        metrics$umap <- list(
-          trustworthiness = round(umap_trust, 4),
-          n_neighbors = input$n_neighbors
-        )
+        metrics$umap <- list(trustworthiness = round(umap_trust, 4), n_neighbors = input$n_neighbors)
       }
       
       if (!is.null(results$pca)) {
-        # Calculate PCA metrics if it was run
-        pca_data <- results$pca
-        
-        # Calculate explained variance for PCA
         pca_variance <- tryCatch({
           if (!is.null(results$pca_summary)) {
-            # Extract proportion of variance explained by first 2 components
-            var_explained <- results$pca_summary$importance[2, 1:2]  # Proportion of Variance row
-            sum(var_explained)
-          } else {
-            NA
-          }
+            sum(results$pca_summary$importance[2, 1:2])
+          } else NA
         }, error = function(e) NA)
         
-        # Store PCA metrics
-        metrics$pca <- list(
-          variance_explained = round(pca_variance, 4),
-          components = input$pca_components
-        )
+        metrics$pca <- list(variance_explained = round(pca_variance, 4), components = input$pca_components)
       }
       
       if (!is.null(results$mds)) {
-        # Calculate MDS metrics if it was run
-        mds_data <- results$mds
-        
-        # Calculate a simple MDS stress or distance preservation metric
         mds_stress <- tryCatch({
-          original_dist <- dist(scale(results$scaled_data))
-          embedding_dist <- dist(as.matrix(mds_data))
-          
-          # Normalize distances
-          original_dist <- original_dist / max(original_dist)
+          original_dist  <- dist(scale(results$scaled_data))
+          embedding_dist <- dist(as.matrix(results$mds))
+          original_dist  <- original_dist  / max(original_dist)
           embedding_dist <- embedding_dist / max(embedding_dist)
-          
-          # Calculate mean squared error between distance matrices
           mean((as.matrix(original_dist) - as.matrix(embedding_dist))^2)
         }, error = function(e) NA)
         
-        # Store MDS metrics
-        metrics$mds <- list(
-          stress = round(mds_stress, 4),
-          method = "Classical MDS"
-        )
+        metrics$mds <- list(stress = round(mds_stress, 4), method = "Classical MDS")
       }
       
-      # Create UI elements to display metrics
-      metrics_ui <- tagList(
-        hr(),
-        h4("Optimization Metrics"),
-        p("These metrics help evaluate the quality of dimensionality reduction results.")
-      )
+      metrics_ui <- tagList(hr(), h4("Optimization Metrics"),
+                            p("These metrics help evaluate the quality of dimensionality reduction results."))
       
-      # Add t-SNE metrics if available
       if (!is.null(metrics$tsne)) {
-        metrics_ui <- tagAppendChildren(
-          metrics_ui,
-          div(
-            h5("t-SNE Metrics:"),
-            p(paste("Perplexity:", metrics$tsne$perplexity)),
-            p(paste("Approximate KL Divergence:", metrics$tsne$kl_divergence, 
-                    "(lower is better)"))
-          )
-        )
+        metrics_ui <- tagAppendChildren(metrics_ui, div(
+          h5("t-SNE Metrics:"),
+          p(paste("Perplexity:", metrics$tsne$perplexity)),
+          p(paste("Approximate KL Divergence:", metrics$tsne$kl_divergence, "(lower is better)"))
+        ))
       }
       
-      # Add UMAP metrics if available
       if (!is.null(metrics$umap)) {
-        metrics_ui <- tagAppendChildren(
-          metrics_ui,
-          div(
-            h5("UMAP Metrics:"),
-            p(paste("n_neighbors:", metrics$umap$n_neighbors)),
-            p(paste("Distance Correlation:", metrics$umap$trustworthiness, 
-                    "(higher is better)"))
-          )
-        )
+        metrics_ui <- tagAppendChildren(metrics_ui, div(
+          h5("UMAP Metrics:"),
+          p(paste("n_neighbors:", metrics$umap$n_neighbors)),
+          p(paste("Distance Correlation:", metrics$umap$trustworthiness, "(higher is better)"))
+        ))
       }
       
-      # Add PCA metrics if available
       if (!is.null(metrics$pca)) {
-        metrics_ui <- tagAppendChildren(
-          metrics_ui,
-          div(
-            h5("PCA Metrics:"),
-            p(paste("Variance Explained:", metrics$pca$variance_explained, 
-                    "(higher is better)")),
-            p(paste("Components:", metrics$pca$components))
-          )
-        )
+        metrics_ui <- tagAppendChildren(metrics_ui, div(
+          h5("PCA Metrics:"),
+          p(paste("Variance Explained:", metrics$pca$variance_explained, "(higher is better)")),
+          p(paste("Components:", metrics$pca$components))
+        ))
       }
       
-      # Add MDS metrics if available
       if (!is.null(metrics$mds)) {
-        metrics_ui <- tagAppendChildren(
-          metrics_ui,
-          div(
-            h5("MDS Metrics:"),
-            p(paste("Stress (distance error):", metrics$mds$stress, 
-                    "(lower is better)")),
-            p(paste("Method:", metrics$mds$method))
-          )
-        )
+        metrics_ui <- tagAppendChildren(metrics_ui, div(
+          h5("MDS Metrics:"),
+          p(paste("Stress (distance error):", metrics$mds$stress, "(lower is better)")),
+          p(paste("Method:", metrics$mds$method))
+        ))
       }
       
-      # Add recommendation if multiple methods are available
-      available_methods <- c()
-      if (!is.null(metrics$tsne)) available_methods <- c(available_methods, "t-SNE")
-      if (!is.null(metrics$umap)) available_methods <- c(available_methods, "UMAP")
-      if (!is.null(metrics$pca)) available_methods <- c(available_methods, "PCA")
-      if (!is.null(metrics$mds)) available_methods <- c(available_methods, "MDS")
-      
-      if (length(available_methods) > 1) {
-        # Calculate simple scores for comparison
-        scores <- list()
-        
-        if (!is.null(metrics$tsne)) {
-          scores$tsne <- 1 - min(metrics$tsne$kl_divergence, 1)  # Convert to 0-1 scale where higher is better
-        }
-        if (!is.null(metrics$umap)) {
-          scores$umap <- max(min(metrics$umap$trustworthiness, 1), 0)  # Ensure in 0-1 range
-        }
-        if (!is.null(metrics$pca)) {
-          scores$pca <- min(metrics$pca$variance_explained, 1)  # Already in 0-1 range
-        }
-        if (!is.null(metrics$mds)) {
-          stress_scaled <- min(metrics$mds$stress / 0.2, 1)
-          scores$mds <- 1 - stress_scaled  # Higher score means better
-        }
-        
-        # Find the best method
-        best_method <- names(scores)[which.max(unlist(scores))]
-        best_score <- round(max(unlist(scores)), 3)
-        
-        # Create recommendation text
-        rec_text <- paste0("Based on calculated metrics, ", best_method, 
-                          " may provide the best results for this dataset (score: ", best_score, ").")
-        
-        # Add context about what each method is good for
-        if (length(available_methods) >= 2) {
-          rec_text <- paste0(rec_text, "\n\nMethod characteristics:\n",
-                            "• t-SNE: Best for revealing local structure and clusters\n",
-                            "• UMAP: Good balance of local and global structure\n",
-                            "• PCA: Linear method, preserves global distances, interpretable components\n",
-                            "• MDS: Preserves pairwise distances, good for visualizing overall geometry")
-        }
-        
-        metrics_ui <- tagAppendChildren(
-          metrics_ui,
-          div(
-            h5("Recommendation:"),
-            p(rec_text, style = "white-space: pre-line;")
-          )
-        )
-      }
-      
-      # Add preprocessing metrics
       if (!is.null(results$metrics)) {
         metrics_ui <- tagAppendChildren(
           metrics_ui,
           hr(),
           h4("Preprocessing Metrics"),
-          # div(
-          #   h5("Compensation:"),
-          #   p(paste("Applied:", results$metrics$compensation$applied)),
-          #   p(paste("Status:", results$metrics$compensation$message))
-          # ),
           div(
             h5("Quality Control:"),
             p(paste("Initial cells:", results$metrics$qc$initial_count)),
-            p(paste("After QC:", results$metrics$qc$final_count)),
+            p(paste("After QC:",     results$metrics$qc$final_count)),
             p(paste("Removed:", round(results$metrics$qc$removed_pct * 100, 1), "%"))
           ),
           div(
             h5("Sampling:"),
-            p(paste("Final analyzed cells:", nrow(results$sampled_data)))
+            p(paste("Final analysed cells:", nrow(results$sampled_data)))
           )
         )
       }
@@ -1667,45 +1445,32 @@ rawDataModuleServer <- function(id, app_state) {
       return(metrics_ui)
     })
     
-    # Make clusterPlot reactive to palette changes
-    observe({
-      # This observer will re-run whenever plot settings change
-      app_state$plot_settings
-      
-      # Force the clusterPlot to invalidate and re-render
-      session$sendCustomMessage(type = "refreshClusterPlot", message = list())
-    })
+    # ============================================================================
+    # PLOT RENDERING — DIMENSIONALITY REDUCTION
+    #
+    # Change 3: The two observe() blocks that called session$sendCustomMessage()
+    # to force plot redraws on font/colour changes have been removed.
+    # They caused every plot to re-render twice on any settings change —
+    # once from sendCustomMessage and once from the reactive dependency on
+    # app_state$plot_settings inside each renderPlotly.
+    #
+    # Change 4: Static theme values replace app_state$plot_settings reads.
+    # Reading plot_settings inside renderPlotly made each plot a direct reactive
+    # dependent of the settings system, causing re-renders on every font or
+    # colour change regardless of whether the underlying data had changed.
+    # All appearance values now come from get_plot_settings() in global.R —
+    # one function call, one place to change values app-wide.
+    # ============================================================================
     
-    # Make t-SNE and UMAP plots reactive to plot settings changes
-    observe({
-      # This observer will re-run whenever plot settings change
-      app_state$plot_settings
-      
-      # Force all plotly outputs to redraw with new settings
-      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("tsnePlot")))
-      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("umapPlot")))
-      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("pcaPlot")))
-      session$sendCustomMessage(type = "plotly-replot", message = list(id = session$ns("mdsPlot")))
-    })
-    
-    # Render t-SNE plot
     output$tsnePlot <- renderPlotly({
-      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
-      font_size <- app_state$plot_settings$font_size
-      point_size <- app_state$plot_settings$point_size
-      color_palette <- app_state$plot_settings$color_palette
-      width <- app_state$plot_settings$width
-      height <- app_state$plot_settings$height
-      
       req(processedData(), "t-SNE" %in% input$methods)
+      
       plot_data <- processedData()$plot_data
       req("tsne1" %in% colnames(plot_data))
       
-      # Create a copy of plot_data
       plot_data_copy <- plot_data
       
-      # Add cluster information if available
-      if (!is.null(clustering_results$clustering_results()) && 
+      if (!is.null(clustering_results$clustering_results()) &&
           clustering_results$showClusteringOptions()) {
         plot_data_copy$Cluster <- as.factor(clustering_results$clustering_results()$cluster_ids)
         color_by <- "Cluster"
@@ -1713,117 +1478,53 @@ rawDataModuleServer <- function(id, app_state) {
         color_by <- NULL
       }
       
-      # Create base plot
       p <- createDimReductionPlot(
-        plot_data = plot_data_copy,
-        dim1 = "tsne1",
-        dim2 = "tsne2",
-        colorBy = color_by,
-        color_palette = color_palette,
-        point_size = point_size,
-        font_size = font_size,
-        title = "t-SNE Projection",
-        xlab = "t-SNE 1",
-        ylab = "t-SNE 2"
+        plot_data     = plot_data_copy,
+        dim1          = "tsne1",
+        dim2          = "tsne2",
+        colorBy       = color_by,
+        color_palette = ps$color_palette,
+        point_size    = ps$point_size,
+        font_size     = ps$font_size,
+        title         = "t-SNE Projection",
+        xlab          = "t-SNE 1",
+        ylab          = "t-SNE 2"
       )
       
-      # Convert to plotly with explicit font settings
-      p_plotly <- ggplotly(p, width = width, height = height)
-      
-      # Apply completely explicit font settings to ensure they're properly applied
-      p_plotly <- p_plotly %>% layout(
-        font = list(
-          family = "Arial",
-          size = font_size,
-          color = "black"
-        ),
-        title = list(
-          text = "t-SNE Projection",
-          font = list(
-            family = "Arial",
-            size = font_size * 1.2,
-            color = "black"
-          )
-        ),
-        xaxis = list(
-          title = list(
-            text = "t-SNE 1",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          ),
-          scaleanchor = "y",
-          scaleratio = 1
-        ),
-        yaxis = list(
-          title = list(
-            text = "t-SNE 2",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          )
-        ),
-        hoverlabel = list(
-          bgcolor = "white",
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9
-          )
-        ),
-        # Add legend settings if clusters are shown
-        legend = if (!is.null(color_by)) list(
-          title = list(
-            text = "Cluster",
-            font = list(
-              family = "Arial",
-              size = font_size,
-              color = "black"
-            )
-          ),
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9,
-            color = "black"
-          ),
-          bgcolor = "rgba(255, 255, 255, 0.9)",
-          bordercolor = "rgba(0, 0, 0, 0.2)",
-          borderwidth = 1
-        ) else list()
-      )
-      
-      return(p_plotly)
+      ggplotly(p, width = ps$width, height = ps$height) %>%
+        layout(
+          font   = list(family = "Arial", size = ps$font_size, color = "black"),
+          title  = list(text = "t-SNE Projection",
+                        font = list(family = "Arial", size = ps$font_size * 1.2, color = "black")),
+          xaxis  = list(title    = list(text = "t-SNE 1",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size),
+                        scaleanchor = "y", scaleratio = 1),
+          yaxis  = list(title    = list(text = "t-SNE 2",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size)),
+          hoverlabel = list(bgcolor = "white",
+                            font    = list(family = "Arial", size = ps$font_size * 0.9)),
+          legend = if (!is.null(color_by)) list(
+            title      = list(text = "Cluster",
+                              font = list(family = "Arial", size = ps$font_size, color = "black")),
+            font       = list(family = "Arial", size = ps$font_size * 0.9, color = "black"),
+            bgcolor    = "rgba(255,255,255,0.9)",
+            bordercolor = "rgba(0,0,0,0.2)",
+            borderwidth = 1
+          ) else list()
+        )
     })
     
-    # Render UMAP plot
     output$umapPlot <- renderPlotly({
-      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
-      font_size <- app_state$plot_settings$font_size
-      point_size <- app_state$plot_settings$point_size
-      color_palette <- app_state$plot_settings$color_palette
-      width <- app_state$plot_settings$width
-      height <- app_state$plot_settings$height
-      
       req(processedData(), "UMAP" %in% input$methods)
+      
       plot_data <- processedData()$plot_data
       req("umap1" %in% colnames(plot_data))
       
-      # Create a copy of plot_data
       plot_data_copy <- plot_data
       
-      # Add cluster information if available
-      if (!is.null(clustering_results$clustering_results()) && 
+      if (!is.null(clustering_results$clustering_results()) &&
           clustering_results$showClusteringOptions()) {
         plot_data_copy$Cluster <- as.factor(clustering_results$clustering_results()$cluster_ids)
         color_by <- "Cluster"
@@ -1831,117 +1532,53 @@ rawDataModuleServer <- function(id, app_state) {
         color_by <- NULL
       }
       
-      # Create base plot
       p <- createDimReductionPlot(
-        plot_data = plot_data_copy,
-        dim1 = "umap1",
-        dim2 = "umap2",
-        colorBy = color_by,
-        color_palette = color_palette,
-        point_size = point_size,
-        font_size = font_size,
-        title = "UMAP Projection",
-        xlab = "UMAP 1",
-        ylab = "UMAP 2"
+        plot_data     = plot_data_copy,
+        dim1          = "umap1",
+        dim2          = "umap2",
+        colorBy       = color_by,
+        color_palette = ps$color_palette,
+        point_size    = ps$point_size,
+        font_size     = ps$font_size,
+        title         = "UMAP Projection",
+        xlab          = "UMAP 1",
+        ylab          = "UMAP 2"
       )
       
-      # Convert to plotly with explicit font settings
-      p_plotly <- ggplotly(p, width = width, height = height)
-      
-      # Apply completely explicit font settings to ensure they're properly applied
-      p_plotly <- p_plotly %>% layout(
-        font = list(
-          family = "Arial",
-          size = font_size,
-          color = "black"
-        ),
-        title = list(
-          text = "UMAP Projection",
-          font = list(
-            family = "Arial",
-            size = font_size * 1.2,
-            color = "black"
-          )
-        ),
-        xaxis = list(
-          title = list(
-            text = "UMAP 1",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          ),
-          scaleanchor = "y",
-          scaleratio = 1
-        ),
-        yaxis = list(
-          title = list(
-            text = "UMAP 2",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          )
-        ),
-        hoverlabel = list(
-          bgcolor = "white",
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9
-          )
-        ),
-        # Add legend settings if clusters are shown
-        legend = if (!is.null(color_by)) list(
-          title = list(
-            text = "Cluster",
-            font = list(
-              family = "Arial",
-              size = font_size,
-              color = "black"
-            )
-          ),
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9,
-            color = "black"
-          ),
-          bgcolor = "rgba(255, 255, 255, 0.9)",
-          bordercolor = "rgba(0, 0, 0, 0.2)",
-          borderwidth = 1
-        ) else list()
-      )
-      
-      return(p_plotly)
+      ggplotly(p, width = ps$width, height = ps$height) %>%
+        layout(
+          font   = list(family = "Arial", size = ps$font_size, color = "black"),
+          title  = list(text = "UMAP Projection",
+                        font = list(family = "Arial", size = ps$font_size * 1.2, color = "black")),
+          xaxis  = list(title    = list(text = "UMAP 1",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size),
+                        scaleanchor = "y", scaleratio = 1),
+          yaxis  = list(title    = list(text = "UMAP 2",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size)),
+          hoverlabel = list(bgcolor = "white",
+                            font    = list(family = "Arial", size = ps$font_size * 0.9)),
+          legend = if (!is.null(color_by)) list(
+            title      = list(text = "Cluster",
+                              font = list(family = "Arial", size = ps$font_size, color = "black")),
+            font       = list(family = "Arial", size = ps$font_size * 0.9, color = "black"),
+            bgcolor    = "rgba(255,255,255,0.9)",
+            bordercolor = "rgba(0,0,0,0.2)",
+            borderwidth = 1
+          ) else list()
+        )
     })
     
-    # Render PCA plot
     output$pcaPlot <- renderPlotly({
-      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
-      font_size <- app_state$plot_settings$font_size
-      point_size <- app_state$plot_settings$point_size
-      color_palette <- app_state$plot_settings$color_palette
-      width <- app_state$plot_settings$width
-      height <- app_state$plot_settings$height
-      
       req(processedData(), "PCA" %in% input$methods)
+      
       plot_data <- processedData()$plot_data
       req("pca1" %in% colnames(plot_data))
       
-      # Create a copy of plot_data
       plot_data_copy <- plot_data
       
-      # Add cluster information if available
-      if (!is.null(clustering_results$clustering_results()) && 
+      if (!is.null(clustering_results$clustering_results()) &&
           clustering_results$showClusteringOptions()) {
         plot_data_copy$Cluster <- as.factor(clustering_results$clustering_results()$cluster_ids)
         color_by <- "Cluster"
@@ -1949,107 +1586,47 @@ rawDataModuleServer <- function(id, app_state) {
         color_by <- NULL
       }
       
-      # Create base plot
       p <- createDimReductionPlot(
-        plot_data = plot_data_copy,
-        dim1 = "pca1",
-        dim2 = "pca2",
-        colorBy = color_by,
-        color_palette = color_palette,
-        point_size = point_size,
-        font_size = font_size,
-        title = "PCA Projection",
-        xlab = "PC 1",
-        ylab = "PC 2"
+        plot_data     = plot_data_copy,
+        dim1          = "pca1",
+        dim2          = "pca2",
+        colorBy       = color_by,
+        color_palette = ps$color_palette,
+        point_size    = ps$point_size,
+        font_size     = ps$font_size,
+        title         = "PCA Projection",
+        xlab          = "PC 1",
+        ylab          = "PC 2"
       )
       
-      # Convert to plotly with explicit font settings
-      p_plotly <- ggplotly(p, width = width, height = height)
-      
-      # Apply completely explicit font settings to ensure they're properly applied
-      p_plotly <- p_plotly %>% layout(
-        font = list(
-          family = "Arial",
-          size = font_size,
-          color = "black"
-        ),
-        title = list(
-          text = "PCA Projection",
-          font = list(
-            family = "Arial",
-            size = font_size * 1.2,
-            color = "black"
-          )
-        ),
-        xaxis = list(
-          title = list(
-            text = "PC 1",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          ),
-          scaleanchor = "y",
-          scaleratio = 1
-        ),
-        yaxis = list(
-          title = list(
-            text = "PC 2",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          )
-        ),
-        hoverlabel = list(
-          bgcolor = "white",
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9
-          )
-        ),
-        # Add legend settings if clusters are shown
-        legend = if (!is.null(color_by)) list(
-          title = list(
-            text = "Cluster",
-            font = list(
-              family = "Arial",
-              size = font_size,
-              color = "black"
-            )
-          ),
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9,
-            color = "black"
-          ),
-          bgcolor = "rgba(255, 255, 255, 0.9)",
-          bordercolor = "rgba(0, 0, 0, 0.2)",
-          borderwidth = 1
-        ) else list()
-      )
-      
-      return(p_plotly)
+      ggplotly(p, width = ps$width, height = ps$height) %>%
+        layout(
+          font   = list(family = "Arial", size = ps$font_size, color = "black"),
+          title  = list(text = "PCA Projection",
+                        font = list(family = "Arial", size = ps$font_size * 1.2, color = "black")),
+          xaxis  = list(title    = list(text = "PC 1",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size),
+                        scaleanchor = "y", scaleratio = 1),
+          yaxis  = list(title    = list(text = "PC 2",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size)),
+          hoverlabel = list(bgcolor = "white",
+                            font    = list(family = "Arial", size = ps$font_size * 0.9)),
+          legend = if (!is.null(color_by)) list(
+            title      = list(text = "Cluster",
+                              font = list(family = "Arial", size = ps$font_size, color = "black")),
+            font       = list(family = "Arial", size = ps$font_size * 0.9, color = "black"),
+            bgcolor    = "rgba(255,255,255,0.9)",
+            bordercolor = "rgba(0,0,0,0.2)",
+            borderwidth = 1
+          ) else list()
+        )
     })
     
     output$mdsPlot <- renderPlotly({
-      font_size <- app_state$plot_settings$font_size
-      point_size <- app_state$plot_settings$point_size
-      color_palette <- app_state$plot_settings$color_palette
-      width <- app_state$plot_settings$width
-      height <- app_state$plot_settings$height
-      
       req(processedData(), "MDS" %in% input$methods)
+      
       plot_data <- processedData()$plot_data
       req("mds1" %in% colnames(plot_data))
       
@@ -2064,486 +1641,177 @@ rawDataModuleServer <- function(id, app_state) {
       }
       
       p <- createDimReductionPlot(
-        plot_data = plot_data_copy,
-        dim1 = "mds1",
-        dim2 = "mds2",
-        colorBy = color_by,
-        color_palette = color_palette,
-        point_size = point_size,
-        font_size = font_size,
-        title = "MDS Projection",
-        xlab = "MDS 1",
-        ylab = "MDS 2"
+        plot_data     = plot_data_copy,
+        dim1          = "mds1",
+        dim2          = "mds2",
+        colorBy       = color_by,
+        color_palette = ps$color_palette,
+        point_size    = ps$point_size,
+        font_size     = ps$font_size,
+        title         = "MDS Projection",
+        xlab          = "MDS 1",
+        ylab          = "MDS 2"
       )
       
-      p_plotly <- ggplotly(p, width = width, height = height)
-      
-      p_plotly <- p_plotly %>% layout(
-        font = list(
-          family = "Arial",
-          size = font_size,
-          color = "black"
-        ),
-        title = list(
-          text = "MDS Projection",
-          font = list(
-            family = "Arial",
-            size = font_size * 1.2,
-            color = "black"
-          )
-        ),
-        xaxis = list(
-          title = list(
-            text = "MDS 1",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          ),
-          scaleanchor = "y",
-          scaleratio = 1
-        ),
-        yaxis = list(
-          title = list(
-            text = "MDS 2",
-            font = list(
-              family = "Arial",
-              size = font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = font_size
-          )
-        ),
-        hoverlabel = list(
-          bgcolor = "white",
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9
-          )
-        ),
-        legend = if (!is.null(color_by)) list(
-          title = list(
-            text = "Cluster",
-            font = list(
-              family = "Arial",
-              size = font_size,
-              color = "black"
-            )
-          ),
-          font = list(
-            family = "Arial",
-            size = font_size * 0.9,
-            color = "black"
-          ),
-          bgcolor = "rgba(255, 255, 255, 0.9)",
-          bordercolor = "rgba(0, 0, 0, 0.2)",
-          borderwidth = 1
-        ) else list()
-      )
-      
-      return(p_plotly)
+      ggplotly(p, width = ps$width, height = ps$height) %>%
+        layout(
+          font   = list(family = "Arial", size = ps$font_size, color = "black"),
+          title  = list(text = "MDS Projection",
+                        font = list(family = "Arial", size = ps$font_size * 1.2, color = "black")),
+          xaxis  = list(title    = list(text = "MDS 1",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size),
+                        scaleanchor = "y", scaleratio = 1),
+          yaxis  = list(title    = list(text = "MDS 2",
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size)),
+          hoverlabel = list(bgcolor = "white",
+                            font    = list(family = "Arial", size = ps$font_size * 0.9)),
+          legend = if (!is.null(color_by)) list(
+            title      = list(text = "Cluster",
+                              font = list(family = "Arial", size = ps$font_size, color = "black")),
+            font       = list(family = "Arial", size = ps$font_size * 0.9, color = "black"),
+            bgcolor    = "rgba(255,255,255,0.9)",
+            bordercolor = "rgba(0,0,0,0.2)",
+            borderwidth = 1
+          ) else list()
+        )
     })
     
     # ============================================================================
     # MARKER EXPRESSION HEATMAP FUNCTIONALITY
     # ============================================================================
     
-    # Update marker choices when data changes
+    # Update marker dropdown when data or name mappings change
     observe({
       req(processedData())
-      markers <- processedData()$markers
-      
-      # Get marker choices with display names
+      markers        <- processedData()$markers
       marker_choices <- getMarkerChoicesWithDisplayNames(markers, markerNameMappings())
-      
-      updateSelectInput(session, "heatmapMarker", 
-                       choices = marker_choices, selected = if(length(markers) > 0) markers[1] else NULL)
+      updateSelectInput(session, "heatmapMarker",
+                        choices  = marker_choices,
+                        selected = if (length(markers) > 0) markers[1] else NULL)
     })
     
-    # Update marker choices when mappings change
     observe({
       req(processedData())
-      markerNameMappings()  # This dependency ensures the observer runs when mappings change
-      
-      markers <- processedData()$markers
+      markerNameMappings()
+      markers           <- processedData()$markers
       current_selection <- input$heatmapMarker
-      
-      # Get marker choices with updated display names
-      marker_choices <- getMarkerChoicesWithDisplayNames(markers, markerNameMappings())
-      
-      updateSelectInput(session, "heatmapMarker", 
-                       choices = marker_choices, selected = current_selection)
+      marker_choices    <- getMarkerChoicesWithDisplayNames(markers, markerNameMappings())
+      updateSelectInput(session, "heatmapMarker",
+                        choices = marker_choices, selected = current_selection)
     })
     
-    # Update dimensionality method choices
+    # Update dimensionality method dropdown when data changes
     observe({
       req(processedData())
-      plot_data <- processedData()$plot_data
+      plot_data        <- processedData()$plot_data
       available_methods <- getAvailableDimMethods(plot_data)
-      
       updateSelectInput(session, "heatmapDimMethod",
-                       choices = names(available_methods),
-                       selected = if(length(available_methods) > 0) names(available_methods)[1] else NULL)
+                        choices  = names(available_methods),
+                        selected = if (length(available_methods) > 0) names(available_methods)[1] else NULL)
     })
     
-    # Render individual marker heatmap
+    # Individual marker heatmap (interactive plotly)
     output$markerHeatmapPlot <- renderPlotly({
       req(processedData(), input$heatmapMarker, input$heatmapDimMethod)
       
-      plot_data <- processedData()$plot_data
+      plot_data         <- processedData()$plot_data
       available_methods <- getAvailableDimMethods(plot_data)
-      
       if (!input$heatmapDimMethod %in% names(available_methods)) return(NULL)
       
       dim_coords <- available_methods[[input$heatmapDimMethod]]
       dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
-      
-      # Optimize data for rendering
-      opt_data <- optimizeHeatmapRendering(plot_data)
-      
+      opt_data   <- optimizeHeatmapRendering(plot_data)
       bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 50
       
       p <- createMarkerExpressionHeatmap(
-        plot_data = opt_data,
-        marker = input$heatmapMarker,
-        dim1 = dim_coords[1],
-        dim2 = dim_coords[2],
-        method = input$heatmapMethod,
-        bins = bins_value,
-        title = paste(input$heatmapMarker, "Expression on", input$heatmapDimMethod),
-        font_size = app_state$plot_settings$font_size,
-        color_palette = input$heatmapColorPalette,
+        plot_data             = opt_data,
+        marker                = input$heatmapMarker,
+        dim1                  = dim_coords[1],
+        dim2                  = dim_coords[2],
+        method                = input$heatmapMethod,
+        bins                  = bins_value,
+        title                 = paste(input$heatmapMarker, "Expression on", input$heatmapDimMethod),
+        font_size             = ps$font_size,
+        color_palette         = input$heatmapColorPalette,
         use_qualitative_labels = (input$legendStyle == "qualitative"),
-        label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
+        label_style           = if (input$legendStyle == "qualitative") input$labelStyle else "standard"
       )
       
-      # Customize axis labels
       p <- p + labs(x = dim_labels[1], y = dim_labels[2])
       
-      p_plotly <- ggplotly(p, width = app_state$plot_settings$width, 
-                          height = app_state$plot_settings$height)
-      
-      # Apply font settings
-      p_plotly <- p_plotly %>% layout(
-        title = list(
-          text = paste(input$heatmapMarker, "Expression on", input$heatmapDimMethod),
-          font = list(
-            family = "Arial",
-            size = app_state$plot_settings$font_size * 1.2,
-            color = "black"
-          )
-        ),
-        xaxis = list(
-          title = list(
-            text = dim_labels[1],
-            font = list(
-              family = "Arial",
-              size = app_state$plot_settings$font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = app_state$plot_settings$font_size
-          )
-        ),
-        yaxis = list(
-          title = list(
-            text = dim_labels[2],
-            font = list(
-              family = "Arial",
-              size = app_state$plot_settings$font_size * 1.1,
-              color = "black"
-            )
-          ),
-          tickfont = list(
-            family = "Arial",
-            size = app_state$plot_settings$font_size
-          )
-        ),
-        hoverlabel = list(
-          bgcolor = "white",
-          font = list(
-            family = "Arial",
-            size = app_state$plot_settings$font_size * 0.9
-          )
+      ggplotly(p, width = ps$width, height = ps$height) %>%
+        layout(
+          title  = list(text = paste(input$heatmapMarker, "Expression on", input$heatmapDimMethod),
+                        font = list(family = "Arial", size = ps$font_size * 1.2, color = "black")),
+          xaxis  = list(title    = list(text = dim_labels[1],
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size)),
+          yaxis  = list(title    = list(text = dim_labels[2],
+                                        font = list(family = "Arial", size = ps$font_size * 1.1)),
+                        tickfont = list(family = "Arial", size = ps$font_size)),
+          hoverlabel = list(bgcolor = "white",
+                            font    = list(family = "Arial", size = ps$font_size * 0.9))
         )
-      )
-      
-      return(p_plotly)
     })
     
-    # Render static marker heatmap with scaling support
+    # Individual marker heatmap (static, used in individual view)
     output$markerHeatmapPlotStatic <- renderPlot({
       req(processedData(), input$heatmapMarker, input$heatmapDimMethod)
       
-      plot_data <- processedData()$plot_data
+      plot_data         <- processedData()$plot_data
       available_methods <- getAvailableDimMethods(plot_data)
-      
       if (!input$heatmapDimMethod %in% names(available_methods)) return(NULL)
       
-      dim_coords <- available_methods[[input$heatmapDimMethod]]
-      dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
-      
-      # Optimize data for rendering
-      opt_data <- optimizeHeatmapRendering(plot_data)
-      
-      bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 50
-      
-      # Get display name for the marker
+      dim_coords          <- available_methods[[input$heatmapDimMethod]]
+      dim_labels          <- getDimAxisLabels(input$heatmapDimMethod)
+      opt_data            <- optimizeHeatmapRendering(plot_data)
+      bins_value          <- if (!is.null(input$heatmapBins)) input$heatmapBins else 50
       marker_display_name <- getMarkerDisplayName(input$heatmapMarker, markerNameMappings())
       
       p <- createMarkerExpressionHeatmap(
-        plot_data = opt_data,
-        marker = input$heatmapMarker,
-        dim1 = dim_coords[1],
-        dim2 = dim_coords[2],
-        method = input$heatmapMethod,
-        bins = bins_value,
-        title = paste(marker_display_name, "Expression on", input$heatmapDimMethod),
-        font_size = app_state$plot_settings$font_size,
-        color_palette = input$heatmapColorPalette,
+        plot_data             = opt_data,
+        marker                = input$heatmapMarker,
+        dim1                  = dim_coords[1],
+        dim2                  = dim_coords[2],
+        method                = input$heatmapMethod,
+        bins                  = bins_value,
+        title                 = paste(marker_display_name, "Expression on", input$heatmapDimMethod),
+        font_size             = ps$font_size,
+        color_palette         = input$heatmapColorPalette,
         use_qualitative_labels = (input$legendStyle == "qualitative"),
-        label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
+        label_style           = if (input$legendStyle == "qualitative") input$labelStyle else "standard"
       )
       
-      # Customize axis labels
       p + labs(x = dim_labels[1], y = dim_labels[2])
       
-    }, width = function() app_state$plot_settings$width,
-       height = function() app_state$plot_settings$height)
+    }, width = function() ps$width, height = function() ps$height)
     
-    # Store analysis results for smart features
     smart_analysis_results <- reactiveVal(NULL)
+    heatmap_display_mode   <- reactiveVal("individual")
     
-    # Track heatmap display mode
-    heatmap_display_mode <- reactiveVal("individual")  # "individual" or "grid"
-    
-    # Run smart analysis when button is clicked
-    observeEvent(input$runSmartAnalysis, {
-      req(processedData(), input$heatmapDimMethod)
-      
-      withProgress(message = 'Running smart analysis...', value = 0, {
-        
-        plot_data <- processedData()$plot_data
-        markers <- processedData()$markers
-        available_methods <- getAvailableDimMethods(plot_data)
-        
-        if (!input$heatmapDimMethod %in% names(available_methods)) {
-          showNotification("Selected dimensionality method not available", type = "error")
-          return()
-        }
-        
-        # Run comprehensive analysis
-        incProgress(0.3, detail = "Analyzing expression hotspots...")
-        
-        analysis_results <- runComprehensiveAnalysis(
-          plot_data = plot_data,
-          markers = markers,
-          dim_methods = list(selected = available_methods[[input$heatmapDimMethod]]),
-          hotspot_threshold = input$hotspotThreshold / 100,
-          population_threshold_high = 0.75,
-          population_threshold_low = 0.25
-        )
-        
-        incProgress(0.7, detail = "Generating population suggestions...")
-        
-        # Store results
-        smart_analysis_results(analysis_results)
-        
-        # Update global app state with suggestions if enabled
-        if (input$enablePopulationSuggestions && !is.null(analysis_results$selected$populations)) {
-          suggested_populations <- convertSuggestionsToPopulations(analysis_results$selected$populations)
-          app_state$cell_identification$suggested_populations <- suggested_populations
-          
-          incProgress(1.0, detail = "Analysis complete!")
-          
-          showNotification(
-            paste("Found", length(analysis_results$selected$populations), "population suggestions and",
-                  analysis_results$selected$summary$markers_with_hotspots, "markers with hotspots!"),
-            type = "message", duration = 5
-          )
-        } else {
-          incProgress(1.0, detail = "Analysis complete!")
-          
-          showNotification(
-            paste("Analysis complete:", analysis_results$selected$summary$markers_with_hotspots, 
-                  "markers with expression hotspots detected"),
-            type = "message", duration = 5
-          )
-        }
-      })
-    })
-    
-    # Render smart analysis results
-    output$smartAnalysisResults <- renderUI({
-      req(smart_analysis_results())
-      
-      results <- smart_analysis_results()$selected
-      
-      if (is.null(results)) {
-        return(div(class = "alert alert-info", "Run smart analysis to see results here."))
-      }
-      
-      # Create summary cards
-      summary_cards <- fluidRow(
-        column(3,
-          div(class = "info-box",
-              style = "background-color: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center;",
-              h4(results$summary$total_markers, style = "margin: 0; color: #1976d2;"),
-              p("Total Markers", style = "margin: 0; font-weight: bold;")
-          )
-        ),
-        column(3,
-          div(class = "info-box",
-              style = "background-color: #f3e5f5; padding: 15px; border-radius: 8px; text-align: center;",
-              h4(results$summary$markers_with_hotspots, style = "margin: 0; color: #7b1fa2;"),
-              p("Markers with Hotspots", style = "margin: 0; font-weight: bold;")
-          )
-        ),
-        column(3,
-          div(class = "info-box",
-              style = "background-color: #e8f5e8; padding: 15px; border-radius: 8px; text-align: center;",
-              h4(results$summary$total_populations, style = "margin: 0; color: #388e3c;"),
-              p("Population Suggestions", style = "margin: 0; font-weight: bold;")
-          )
-        ),
-        column(3,
-          div(class = "info-box",
-              style = "background-color: #fff3e0; padding: 15px; border-radius: 8px; text-align: center;",
-              h4(input$heatmapDimMethod, style = "margin: 0; color: #f57c00;"),
-              p("Analysis Method", style = "margin: 0; font-weight: bold;")
-          )
-        )
-      )
-      
-      # Create detailed results
-      detailed_results <- tagList()
-      
-      # Hotspot detection results
-      if (input$enableHotspotDetection) {
-        hotspot_summary <- div(
-          h6(icon("fire"), "Expression Hotspots by Marker"),
-          DT::dataTableOutput(session$ns("hotspotSummaryTable"))
-        )
-        detailed_results <- tagAppendChild(detailed_results, hotspot_summary)
-      }
-      
-      # Population suggestions
-      if (input$enablePopulationSuggestions) {
-        population_summary <- div(
-          h6(icon("users"), "Population Suggestions"),
-          DT::dataTableOutput(session$ns("populationSuggestionsTable"))
-        )
-        detailed_results <- tagAppendChild(detailed_results, population_summary)
-      }
-      
-      return(tagList(
-        summary_cards,
-        br(),
-        detailed_results
-      ))
-    })
-    
-    # Render hotspot summary table
-    output$hotspotSummaryTable <- DT::renderDataTable({
-      req(smart_analysis_results(), input$enableHotspotDetection)
-      
-      results <- smart_analysis_results()$selected$markers
-      
-      # Create summary table
-      hotspot_data <- data.frame(
-        Marker = names(results),
-        NumHotspots = sapply(results, function(x) x$num_hotspots),
-        HighExpressionPercent = round(sapply(results, function(x) x$high_expression_percent), 1),
-        Threshold = round(sapply(results, function(x) x$threshold), 3),
-        Message = sapply(results, function(x) x$message),
-        stringsAsFactors = FALSE
-      )
-      
-      DT::datatable(
-        hotspot_data,
-        options = list(
-          pageLength = 10,
-          scrollX = TRUE,
-          dom = 't'
-        ),
-        caption = "Expression hotspot detection results"
-      )
-    })
-    
-    # Render population suggestions table
-    output$populationSuggestionsTable <- DT::renderDataTable({
-      req(smart_analysis_results(), input$enablePopulationSuggestions)
-      
-      results <- smart_analysis_results()$selected
-      population_table <- createPopulationSummaryTable(list(selected = results), "selected")
-      
-      if (nrow(population_table) == 0 || "Message" %in% colnames(population_table)) {
-        return(DT::datatable(
-          data.frame(Message = "No population suggestions found"),
-          options = list(dom = 't')
-        ))
-      }
-      
-      DT::datatable(
-        population_table,
-        options = list(
-          pageLength = 10,
-          scrollX = TRUE,
-          dom = 't'
-        ),
-        caption = "Automatically suggested cell populations"
-      ) %>%
-        DT::formatRound(columns = c("Percentage", "Confidence"), digits = 1)
-    })
-    
-
-    
-    # Ultra-fast grid view button handler
     observeEvent(input$generateAllHeatmapsFast, {
       req(processedData(), input$heatmapDimMethod)
       heatmap_display_mode("grid")
-      
       showNotification("Switched to fast grid view", type = "message", duration = 3)
     })
     
-    # Switch back to individual view when marker selection changes
     observeEvent(input$heatmapMarker, {
-      if (heatmap_display_mode() == "grid") {
-        heatmap_display_mode("individual")
-      }
+      if (heatmap_display_mode() == "grid") heatmap_display_mode("individual")
     })
     
-    # Dynamic main display area
     output$heatmapMainDisplay <- renderUI({
       if (heatmap_display_mode() == "grid") {
-        # Ultra-fast grid view
         tagList(
           div(class = "alert alert-success", style = "margin-bottom: 10px;",
               icon("lightning-bolt"), " Fast Grid Mode: All markers rendered simultaneously"),
-          
-          # Back to individual button
-          actionButton(session$ns("backToIndividual"), "← Back to Individual View", 
-                      class = "btn-secondary btn-sm", style = "margin-bottom: 15px;"),
-          
-          # Ultra-fast grid
-          shinycssloaders::withSpinner(
-            uiOutput(session$ns("ultraFastGrid"))
-          )
+          actionButton(session$ns("backToIndividual"), "<- Back to Individual View",
+                       class = "btn-secondary btn-sm", style = "margin-bottom: 15px;"),
+          shinycssloaders::withSpinner(uiOutput(session$ns("ultraFastGrid")))
         )
       } else {
-        # Individual heatmap view - STATIC ONLY
         tagList(
-          # Static plot output only
           shinycssloaders::withSpinner(
             plotOutput(session$ns("markerHeatmapPlotStatic"), height = "600px")
           )
@@ -2551,96 +1819,76 @@ rawDataModuleServer <- function(id, app_state) {
       }
     })
     
-    # Back to individual view button handler
     observeEvent(input$backToIndividual, {
       heatmap_display_mode("individual")
     })
     
-    # Ultra-fast grid rendering
     output$ultraFastGrid <- renderUI({
       req(processedData(), input$heatmapDimMethod, heatmap_display_mode() == "grid")
       
-      markers <- processedData()$markers
-      plot_data <- processedData()$plot_data
+      markers           <- processedData()$markers
+      plot_data         <- processedData()$plot_data
       available_methods <- getAvailableDimMethods(plot_data)
-      dim_coords <- available_methods[[input$heatmapDimMethod]]
-      dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
-      
-      # Create grid layout (2 plots per row for larger size)
-      cols <- 2
-      bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 30
-      
-      # Larger plots with increased height
-      plot_height <- "500px"
+      dim_coords        <- available_methods[[input$heatmapDimMethod]]
+      dim_labels        <- getDimAxisLabels(input$heatmapDimMethod)
+      bins_value        <- if (!is.null(input$heatmapBins)) input$heatmapBins else 30
       
       plot_list <- lapply(seq_along(markers), function(i) {
-        marker <- markers[i]
-        plot_id <- paste0("ultraFastHeatmap_", i)
-        
-        # Get display name for this marker
+        marker              <- markers[i]
+        plot_id             <- paste0("ultraFastHeatmap_", i)
         marker_display_name <- getMarkerDisplayName(marker, markerNameMappings())
         
         output[[plot_id]] <- renderPlot({
-          # No point restriction for static plots
           opt_data <- optimizeHeatmapRendering(plot_data)
           
           p <- createMarkerExpressionHeatmap(
-            plot_data = opt_data,
-            marker = marker,
-            dim1 = dim_coords[1], 
-            dim2 = dim_coords[2],
-            method = input$heatmapMethod,
-            bins = bins_value,
-            title = marker_display_name,
-            font_size = 18,  # Smaller font for grid
-            color_palette = input$heatmapColorPalette,
+            plot_data             = opt_data,
+            marker                = marker,
+            dim1                  = dim_coords[1],
+            dim2                  = dim_coords[2],
+            method                = input$heatmapMethod,
+            bins                  = bins_value,
+            title                 = marker_display_name,
+            font_size             = 18,
+            color_palette         = input$heatmapColorPalette,
             use_qualitative_labels = (input$legendStyle == "qualitative"),
-            label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
+            label_style           = if (input$legendStyle == "qualitative") input$labelStyle else "standard"
           )
           
-          # Minimal styling for speed
           p + labs(x = dim_labels[1], y = dim_labels[2]) +
-            theme(
-              plot.title = element_text(size = 18, face = "bold"),
-              axis.title = element_text(size = 15),
-              axis.text = element_text(size = 14),
-              legend.title = element_text(size = 12),
-              legend.text = element_text(size = 10)
-            )
+            theme(plot.title  = element_text(size = 18, face = "bold"),
+                  axis.title  = element_text(size = 15),
+                  axis.text   = element_text(size = 14),
+                  legend.title = element_text(size = 12),
+                  legend.text  = element_text(size = 10))
         })
         
-        column(6,
-          plotOutput(session$ns(plot_id), height = plot_height)
-        )
+        column(6, plotOutput(session$ns(plot_id), height = "500px"))
       })
       
-      # Add download button at the top
       download_section <- fluidRow(
         column(12,
-          div(class = "text-center", style = "margin-bottom: 20px;",
-            downloadButton(session$ns("downloadGridPlots"),
-                          "Download All Plots as PNG",
-                          class = "btn-success btn-lg",
-                          icon = icon("download"),
-                          style = "margin-bottom: 15px;"),
-            br(),
-            tags$small(class = "text-muted", 
-                      paste("Will save", length(markers), "individual plots + 1 combined overview (4-column layout) as high-resolution PNG files"))
-          )
+               div(class = "text-center", style = "margin-bottom: 20px;",
+                   downloadButton(session$ns("downloadGridPlots"), "Download All Plots as PNG",
+                                  class = "btn-success btn-lg", icon = icon("download"),
+                                  style = "margin-bottom: 15px;"),
+                   br(),
+                   tags$small(class = "text-muted",
+                              paste("Will save", length(markers),
+                                    "individual plots + 1 combined overview as high-resolution PNG files"))
+               )
         )
       )
       
-      # Arrange plots in rows
       grid_rows <- list()
-      for (i in seq(1, length(plot_list), by = cols)) {
-        row_plots <- plot_list[i:min(i + cols - 1, length(plot_list))]
+      for (i in seq(1, length(plot_list), by = 2)) {
+        row_plots <- plot_list[i:min(i + 1, length(plot_list))]
         grid_rows[[length(grid_rows) + 1]] <- fluidRow(do.call(tagList, row_plots))
       }
       
       do.call(tagList, c(list(download_section), grid_rows))
     })
     
-    # Download handler for fast grid plots
     output$downloadGridPlots <- downloadHandler(
       filename = function() {
         paste0("heatmap_grid_plots_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".zip")
@@ -2648,159 +1896,100 @@ rawDataModuleServer <- function(id, app_state) {
       content = function(file) {
         req(processedData(), input$heatmapDimMethod)
         
-        # Show progress
         withProgress(message = "Generating high-resolution plots...", value = 0, {
           
-          # Get current settings
-          markers <- processedData()$markers
-          plot_data <- processedData()$plot_data
+          markers           <- processedData()$markers
+          plot_data         <- processedData()$plot_data
           available_methods <- getAvailableDimMethods(plot_data)
-          dim_coords <- available_methods[[input$heatmapDimMethod]]
-          dim_labels <- getDimAxisLabels(input$heatmapDimMethod)
-          bins_value <- if (!is.null(input$heatmapBins)) input$heatmapBins else 30
+          dim_coords        <- available_methods[[input$heatmapDimMethod]]
+          dim_labels        <- getDimAxisLabels(input$heatmapDimMethod)
+          bins_value        <- if (!is.null(input$heatmapBins)) input$heatmapBins else 30
+          opt_data          <- optimizeHeatmapRendering(plot_data)
           
-          # Optimize data for rendering (no point restriction for static plots)
-          opt_data <- optimizeHeatmapRendering(plot_data)
-          
-          # Create temporary directory for PNG files
-          temp_dir <- tempdir()
-          png_dir <- file.path(temp_dir, "heatmap_plots")
+          png_dir <- file.path(tempdir(), "heatmap_plots")
           if (dir.exists(png_dir)) unlink(png_dir, recursive = TRUE)
           dir.create(png_dir, recursive = TRUE)
           
-                     # Generate each plot and store for combined plot
-           png_files <- character()
-           individual_plots <- list()
-           
-           for (i in seq_along(markers)) {
-             incProgress(0.8/length(markers), detail = paste("Generating plot", i, "of", length(markers)))
-             
-             marker <- markers[i]
-             marker_display_name <- getMarkerDisplayName(marker, markerNameMappings())
-             
-             # Create safe filename
-             safe_name <- gsub("[^A-Za-z0-9._-]", "_", marker_display_name)
-             png_filename <- file.path(png_dir, paste0(sprintf("%02d", i), "_", safe_name, ".png"))
-             
-             # Create high-resolution plot
-             tryCatch({
-               p <- createMarkerExpressionHeatmap(
-                 plot_data = opt_data,
-                 marker = marker,
-                 dim1 = dim_coords[1], 
-                 dim2 = dim_coords[2],
-                 method = input$heatmapMethod,
-                 bins = bins_value,
-                 title = marker_display_name,
-                 font_size = 18,  # Use same font size as display
-                 color_palette = input$heatmapColorPalette,
-                 use_qualitative_labels = (input$legendStyle == "qualitative"),
-                 label_style = if(input$legendStyle == "qualitative") input$labelStyle else "standard"
-               )
-               
-               # Apply theme matching the display with white background
-               p_final <- p + labs(x = dim_labels[1], y = dim_labels[2]) +
-                 theme(
-                   plot.title = element_text(size = 18, face = "bold"),
-                   axis.title = element_text(size = 15),
-                   axis.text = element_text(size = 14),
-                   legend.title = element_text(size = 12),
-                   legend.text = element_text(size = 10),
-                   panel.background = element_rect(fill = "white", color = NA),
-                   plot.background = element_rect(fill = "white", color = NA),
-                   legend.background = element_rect(fill = "white", color = NA)
-                 )
-               
-               # Save individual plot
-               ggsave(png_filename, plot = p_final, 
-                      width = 10, height = 8, dpi = 300, device = "png", bg = "white")
-               
-               png_files <- c(png_files, png_filename)
-               
-               # Store plot for combined layout (with smaller font for grid)
-               p_grid <- p + labs(x = dim_labels[1], y = dim_labels[2]) +
-                 theme(
-                   plot.title = element_text(size = 14, face = "bold"),
-                   axis.title = element_text(size = 11),
-                   axis.text = element_text(size = 10),
-                   legend.title = element_text(size = 10),
-                   legend.text = element_text(size = 8),
-                   panel.background = element_rect(fill = "white", color = NA),
-                   plot.background = element_rect(fill = "white", color = NA),
-                   legend.background = element_rect(fill = "white", color = NA),
-                   legend.key.size = unit(0.4, "cm")  # Smaller legend for grid
-                 )
-               
-               individual_plots[[i]] <- p_grid
-               
-             }, error = function(e) {
-               message("Error generating plot for ", marker, ": ", e$message)
-               individual_plots[[i]] <- NULL
-             })
-           }
-           
-           # Create combined plot with 4-column layout
-           incProgress(0.15, detail = "Creating combined overview plot...")
-           if (length(individual_plots) > 0) {
-             # Remove any NULL plots
-             valid_plots <- individual_plots[!sapply(individual_plots, is.null)]
-             
-             if (length(valid_plots) > 0) {
-               tryCatch({
-                 # Calculate grid dimensions (4 columns)
-                 n_plots <- length(valid_plots)
-                 n_cols <- 4
-                 n_rows <- ceiling(n_plots / n_cols)
-                 
-                 # Create combined plot filename
-                 combined_filename <- file.path(png_dir, "00_COMBINED_All_Markers.png")
-                 
-                 # Calculate dimensions for combined plot
-                 plot_width_per_panel <- 8  # inches per panel
-                 plot_height_per_panel <- 6  # inches per panel
-                 total_width <- n_cols * plot_width_per_panel
-                 total_height <- n_rows * plot_height_per_panel
-                 
-                 # Create combined plot using gridExtra
-                 combined_plot <- gridExtra::grid.arrange(grobs = valid_plots, ncol = n_cols)
-                 
-                 # Save combined plot
-                 ggsave(combined_filename, plot = combined_plot,
-                        width = total_width, height = total_height, 
-                        dpi = 300, device = "png", bg = "white")
-                 
-                 png_files <- c(combined_filename, png_files)  # Add to beginning of list
-                 
-               }, error = function(e) {
-                 message("Error creating combined plot: ", e$message)
-               })
-             }
-           }
+          png_files        <- character()
+          individual_plots <- list()
           
-          # Create ZIP file
+          for (i in seq_along(markers)) {
+            incProgress(0.8 / length(markers),
+                        detail = paste("Generating plot", i, "of", length(markers)))
+            
+            marker              <- markers[i]
+            marker_display_name <- getMarkerDisplayName(marker, markerNameMappings())
+            safe_name           <- gsub("[^A-Za-z0-9._-]", "_", marker_display_name)
+            png_filename        <- file.path(png_dir, paste0(sprintf("%02d", i), "_", safe_name, ".png"))
+            
+            tryCatch({
+              p <- createMarkerExpressionHeatmap(
+                plot_data             = opt_data,
+                marker                = marker,
+                dim1                  = dim_coords[1],
+                dim2                  = dim_coords[2],
+                method                = input$heatmapMethod,
+                bins                  = bins_value,
+                title                 = marker_display_name,
+                font_size             = 18,
+                color_palette         = input$heatmapColorPalette,
+                use_qualitative_labels = (input$legendStyle == "qualitative"),
+                label_style           = if (input$legendStyle == "qualitative") input$labelStyle else "standard"
+              )
+              
+              p_final <- p + labs(x = dim_labels[1], y = dim_labels[2]) +
+                theme(plot.title        = element_text(size = 18, face = "bold"),
+                      axis.title        = element_text(size = 15),
+                      axis.text         = element_text(size = 14),
+                      legend.title      = element_text(size = 12),
+                      legend.text       = element_text(size = 10),
+                      panel.background  = element_rect(fill = "white", color = NA),
+                      plot.background   = element_rect(fill = "white", color = NA),
+                      legend.background = element_rect(fill = "white", color = NA))
+              
+              ggsave(png_filename, plot = p_final,
+                     width = 10, height = 8, dpi = 300, device = "png", bg = "white")
+              
+              png_files           <- c(png_files, png_filename)
+              individual_plots[[i]] <- p_final
+              
+            }, error = function(e) {
+              message("Error generating plot for ", marker, ": ", e$message)
+            })
+          }
+          
+          incProgress(0.15, detail = "Creating combined overview plot...")
+          
+          valid_plots <- individual_plots[!sapply(individual_plots, is.null)]
+          if (length(valid_plots) > 0) {
+            tryCatch({
+              n_cols           <- 4
+              n_rows           <- ceiling(length(valid_plots) / n_cols)
+              combined_filename <- file.path(png_dir, "00_COMBINED_All_Markers.png")
+              
+              combined_plot <- gridExtra::grid.arrange(grobs = valid_plots, ncol = n_cols)
+              ggsave(combined_filename, plot = combined_plot,
+                     width = n_cols * 8, height = n_rows * 6,
+                     dpi = 300, device = "png", bg = "white")
+              
+              png_files <- c(combined_filename, png_files)
+            }, error = function(e) message("Error creating combined plot: ", e$message))
+          }
+          
           if (length(png_files) > 0) {
-            # Change to the plot directory to avoid including full paths in ZIP
             old_wd <- setwd(png_dir)
             on.exit(setwd(old_wd))
+            zip(file, files = basename(png_files), flags = "-r9X")
             
-            zip_files <- basename(png_files)
-            zip(file, files = zip_files, flags = "-r9X")
+            has_combined    <- any(grepl("COMBINED", basename(png_files)))
+            individual_count <- length(png_files) - ifelse(has_combined, 1, 0)
             
-                         incProgress(0.05, detail = paste("Created ZIP with", length(png_files), "files"))
-             
-             # Check if combined plot was created
-             has_combined <- any(grepl("COMBINED", basename(png_files)))
-             individual_count <- length(png_files) - ifelse(has_combined, 1, 0)
-             
-             if (has_combined) {
-               showNotification(paste("Successfully exported", individual_count, "individual plots + 1 combined overview plot"), 
-                              type = "message", duration = 6)
-             } else {
-               showNotification(paste("Successfully exported", individual_count, "individual plots"), 
-                              type = "message", duration = 5)
-             }
+            showNotification(
+              paste("Exported", individual_count, "plots",
+                    if (has_combined) "+ 1 combined overview" else ""),
+              type = "message", duration = 6
+            )
           } else {
-            # Create empty file if no plots generated
             writeLines("No plots could be generated", file)
             showNotification("No plots could be generated", type = "error")
           }
@@ -2808,150 +1997,92 @@ rawDataModuleServer <- function(id, app_state) {
       }
     )
     
-    # Cluster visualization in dedicated tab
+    # ============================================================================
+    # CLUSTER VISUALIZATION
+    # ============================================================================
+    
     output$clusterPlot <- renderPlotly({
-      # Explicitly track app_state$plot_settings to make this plot reactive to font changes
-      font_size <- app_state$plot_settings$font_size
-      point_size <- app_state$plot_settings$point_size
-      color_palette <- app_state$plot_settings$color_palette
-      width <- app_state$plot_settings$width
-      height <- app_state$plot_settings$height
-      
       req(processedData())
       
-      # Check if we have clustering results (either original or merged)
       if (mergeHistory()$active) {
-        # Use merged clusters
-        cluster_data <- list(
+        cluster_data   <- list(
           cluster_ids = mergeHistory()$current_clusters,
-          method = paste(clustering_results$clustering_results()$method, 
-                         "(", length(mergeHistory()$operations), " merges)")
+          method      = paste(clustering_results$clustering_results()$method,
+                              "(", length(mergeHistory()$operations), " merges)")
         )
         population_data <- mergeHistory()$current_mapping
       } else if (!is.null(clustering_results$clustering_results())) {
-        # Use original clustering
-        cluster_data <- clustering_results$clustering_results()
+        cluster_data    <- clustering_results$clustering_results()
         population_data <- clustering_results$populations()
       } else {
-        return(NULL)  # No clustering data available
+        return(NULL)
       }
       
-      plot_data <- processedData()$plot_data
-      
-      # Add cluster information
+      plot_data         <- processedData()$plot_data
       plot_data$Cluster <- as.factor(cluster_data$cluster_ids)
       
-      # Add population labels if available
-      if (!is.null(population_data) && 
-          clustering_results$showPopulationLabels()) {
-        # Map cluster IDs to population names
-        population_map <- setNames(
-          population_data$Population,
-          as.character(population_data$Cluster)
-        )
-        
-        # Add population column to plot data
+      if (!is.null(population_data) && clustering_results$showPopulationLabels()) {
+        population_map     <- setNames(population_data$Population,
+                                       as.character(population_data$Cluster))
         plot_data$Population <- population_map[as.character(plot_data$Cluster)]
-        
-        # Use population names for coloring
         color_by <- "Population"
       } else {
         color_by <- "Cluster"
       }
       
-      # Choose appropriate dimensions
       if ("tsne1" %in% colnames(plot_data)) {
-        dim1 <- "tsne1"
-        dim2 <- "tsne2"
-        dim_labels <- c("t-SNE 1", "t-SNE 2")
+        dim1 <- "tsne1"; dim2 <- "tsne2"; dim_labels <- c("t-SNE 1", "t-SNE 2")
       } else if ("umap1" %in% colnames(plot_data)) {
-        dim1 <- "umap1"
-        dim2 <- "umap2"
-        dim_labels <- c("UMAP 1", "UMAP 2")
+        dim1 <- "umap1"; dim2 <- "umap2"; dim_labels <- c("UMAP 1", "UMAP 2")
       } else if ("pca1" %in% colnames(plot_data)) {
-        dim1 <- "pca1"
-        dim2 <- "pca2"
-        dim_labels <- c("PC 1", "PC 2")
+        dim1 <- "pca1"; dim2 <- "pca2"; dim_labels <- c("PC 1", "PC 2")
       } else if ("mds1" %in% colnames(plot_data)) {
-        dim1 <- "mds1"
-        dim2 <- "mds2"
-        dim_labels <- c("MDS 1", "MDS 2")
+        dim1 <- "mds1"; dim2 <- "mds2"; dim_labels <- c("MDS 1", "MDS 2")
       } else {
-        # Fallback to first two markers if no dimension reduction available
-        dim1 <- input$selectedMarkers[1]
-        dim2 <- input$selectedMarkers[2]
+        dim1 <- input$selectedMarkers[1]; dim2 <- input$selectedMarkers[2]
         dim_labels <- input$selectedMarkers[1:2]
       }
       
-      # Create a base ggplot with correct color palette
       p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], color = .data[[color_by]])) +
-        geom_point(alpha = 0.7, size = point_size/2) +
-        get_color_palette(color_palette) +
-        labs(
-          title = paste("Clusters from", cluster_data$method),
-          x = dim_labels[1],
-          y = dim_labels[2],
-          color = if(color_by == "Population") "Cell Population" else "Cluster"
-        ) +
-        get_standard_theme(font_size)
+        geom_point(alpha = 0.7, size = ps$point_size / 2) +
+        get_color_palette(ps$color_palette) +
+        labs(title = paste("Clusters from", cluster_data$method),
+             x     = dim_labels[1],
+             y     = dim_labels[2],
+             color = if (color_by == "Population") "Cell Population" else "Cluster") +
+        get_standard_theme(ps$font_size)
       
-      # Convert to plotly
       p_plotly <- ggplotly(p, tooltip = c("color", "x", "y")) %>%
         layout(
-          legend = list(
-            title = list(
-              text = if(color_by == "Population") "Cell Population" else "Cluster",
-              font = list(
-                size = font_size,
-                family = "Arial"
-              )
-            ),
-            font = list(
-              size = font_size * 0.9,
-              family = "Arial"
-            ),
-            bgcolor = "rgba(255, 255, 255, 0.9)",
-            bordercolor = "rgba(0, 0, 0, 0.2)",
-            borderwidth = 1
-          ),
-          hoverlabel = list(
-            bgcolor = "white",
-            font = list(
-              family = "Arial",
-              size = font_size * 0.9
-            )
-          ),
-          width = width,
-          height = height
+          legend     = list(title      = list(text = if (color_by == "Population") "Cell Population" else "Cluster",
+                                              font = list(size = ps$font_size, family = "Arial")),
+                            font       = list(size = ps$font_size * 0.9, family = "Arial"),
+                            bgcolor    = "rgba(255,255,255,0.9)",
+                            bordercolor = "rgba(0,0,0,0.2)",
+                            borderwidth = 1),
+          hoverlabel = list(bgcolor = "white",
+                            font    = list(family = "Arial", size = ps$font_size * 0.9)),
+          width  = ps$width,
+          height = ps$height
         )
       
-      # Add cluster labels if showing population names and user has enabled labels
-      if (color_by == "Population" && clustering_results$showPopulationLabels() && clustering_results$showClusterLabels()) {
-        # Calculate cluster centers for label positioning
+      if (color_by == "Population" && clustering_results$showPopulationLabels() &&
+          clustering_results$showClusterLabels()) {
+        
         cluster_centers <- plot_data %>%
           group_by(Cluster, Population) %>%
-          summarize(
-            x = mean(.data[[dim1]], na.rm = TRUE),
-            y = mean(.data[[dim2]], na.rm = TRUE),
-            .groups = 'drop'
-          )
+          summarize(x = mean(.data[[dim1]], na.rm = TRUE),
+                    y = mean(.data[[dim2]], na.rm = TRUE),
+                    .groups = "drop")
         
-        # Add annotations to plot
-        for (i in 1:nrow(cluster_centers)) {
+        for (i in seq_len(nrow(cluster_centers))) {
           p_plotly <- p_plotly %>% add_annotations(
-            x = cluster_centers$x[i],
-            y = cluster_centers$y[i],
+            x = cluster_centers$x[i], y = cluster_centers$y[i],
             text = cluster_centers$Population[i],
-            showarrow = TRUE,
-            arrowhead = 0.5,
-            arrowsize = 0.5,
-            arrowwidth = 1,
-            ax = 20,
-            ay = -20,
-            bgcolor = "rgba(255, 255, 255, 0.8)",
-            bordercolor = "rgba(0, 0, 0, 0.5)",
-            borderwidth = 1,
-            font = list(size = font_size)
+            showarrow = TRUE, arrowhead = 0.5, arrowsize = 0.5, arrowwidth = 1,
+            ax = 20, ay = -20,
+            bgcolor = "rgba(255,255,255,0.8)", bordercolor = "rgba(0,0,0,0.5)",
+            borderwidth = 1, font = list(size = ps$font_size)
           )
         }
       }
@@ -2959,256 +2090,157 @@ rawDataModuleServer <- function(id, app_state) {
       return(p_plotly)
     })
     
-    # Cluster heatmap
     output$clusterHeatmap <- renderPlot({
       req(clustering_results$clustering_results())
       
-      # Explicitly get font_size from app_state
-      font_size <- app_state$plot_settings$font_size
-      
-      # Use original centers but update if merged
       centers <- clustering_results$clustering_results()$centers
-      method <- clustering_results$clustering_results()$method
+      method  <- clustering_results$clustering_results()$method
       
-      # Get population data
-      if (mergeHistory()$active) {
-        population_data <- mergeHistory()$current_mapping
-      } else {
-        population_data <- clustering_results$populations()
-      }
+      population_data <- if (mergeHistory()$active) mergeHistory()$current_mapping else
+        clustering_results$populations()
       
-      # If using merged clusters, adjust the centers
       if (mergeHistory()$active) {
-        operations <- mergeHistory()$operations
-        
-        # Create new centers data
         new_centers <- centers
-        
-        # Apply each merge operation sequentially
-        for (op in operations) {
-          merged_id <- op$target_cluster
+        for (op in mergeHistory()$operations) {
+          merged_id   <- op$target_cluster
           merged_from <- op$merged_clusters
-          
-          # Calculate weighted means across markers
           if (length(merged_from) > 1) {
-            # Get counts of each cluster for weighted average
-            cluster_counts <- table(clustering_results$clustering_results()$cluster_ids)
-            merged_weights <- cluster_counts[merged_from]
-            
-            # Calculate weighted means across markers
-            for (col in 1:ncol(centers)) {
+            cluster_counts  <- table(clustering_results$clustering_results()$cluster_ids)
+            merged_weights  <- cluster_counts[merged_from]
+            for (col in seq_len(ncol(centers))) {
               values <- new_centers[as.character(merged_from), col]
               weights <- merged_weights / sum(merged_weights)
               new_centers[as.character(merged_id), col] <- sum(values * weights, na.rm = TRUE)
             }
-            
-            # Remove rows for clusters that were merged (except the target)
-            new_centers <- new_centers[!(rownames(new_centers) %in% setdiff(as.character(merged_from), as.character(merged_id))), ]
+            new_centers <- new_centers[
+              !(rownames(new_centers) %in% setdiff(as.character(merged_from), as.character(merged_id))), ]
           }
         }
-        
         centers <- new_centers
-        method <- paste(method, "(", length(operations), " merges)")
+        method  <- paste(method, "(", length(mergeHistory()$operations), " merges)")
       }
       
-      # Create heatmap
-      createClusterHeatmap(
-        centers = centers,
-        method = method,
-        title = "Cluster Intensity Profiles",
-        font_size = font_size,
-        population_data = population_data
-      )
-    }, width = function() app_state$plot_settings$width,
-    height = function() app_state$plot_settings$height)
+      createClusterHeatmap(centers = centers, method = method,
+                           title = "Cluster Intensity Profiles",
+                           font_size = ps$font_size, population_data = population_data)
+      
+    }, width = function() ps$width, height = function() ps$height)
     
-    # Cluster statistics
+    # ============================================================================
+    # CLUSTER STATISTICS AND DOWNLOAD
+    # ============================================================================
+    
     output$clusterStats <- DT::renderDataTable({
       req(processedData())
       
-      # Check whether to use merged or original clusters
       if (mergeHistory()$active) {
-        cluster_ids <- mergeHistory()$current_clusters
+        cluster_ids     <- mergeHistory()$current_clusters
         population_data <- mergeHistory()$current_mapping
-        method_name <- paste(clustering_results$clustering_results()$method, 
-                            "(", length(mergeHistory()$operations), " merges)")
+        method_name     <- paste(clustering_results$clustering_results()$method,
+                                 "(", length(mergeHistory()$operations), " merges)")
       } else if (!is.null(clustering_results$clustering_results())) {
-        cluster_ids <- clustering_results$clustering_results()$cluster_ids
+        cluster_ids     <- clustering_results$clustering_results()$cluster_ids
         population_data <- clustering_results$populations()
-        method_name <- clustering_results$clustering_results()$method
+        method_name     <- clustering_results$clustering_results()$method
       } else {
         return(NULL)
       }
       
-      # Format cluster statistics
-      stats_df <- formatClusterStats(
-        cluster_ids = cluster_ids,
-        total_cells = nrow(processedData()$plot_data),
-        population_data = population_data
-      )
+      stats_df <- formatClusterStats(cluster_ids   = cluster_ids,
+                                     total_cells   = nrow(processedData()$plot_data),
+                                     population_data = population_data)
       
-      # Create datatable
-      DT::datatable(stats_df, 
-                    options = list(scrollX = TRUE, pageLength = 10),
+      DT::datatable(stats_df, options = list(scrollX = TRUE, pageLength = 10),
                     caption = paste("Cluster statistics from", method_name)) %>%
         formatRound(columns = c("Percentage", "Confidence"), digits = 2)
     })
     
-    # Population results table
     output$populationTable <- DT::renderDataTable({
       req(!is.null(clustering_results$populations()))
       
-      # Use merged population mappings if available
-      if (mergeHistory()$active) {
-        population_data <- mergeHistory()$current_mapping
-        
-        # Add information about merge operations
+      population_data <- if (mergeHistory()$active) {
+        pd <- mergeHistory()$current_mapping
         if (length(mergeHistory()$operations) > 0) {
-          # Create a summary of merges performed
-          merge_summary <- lapply(mergeHistory()$operations, function(op) {
-            data.frame(
-              Cluster = op$target_cluster,
-              Population = paste0(op$new_name, " (merged)"),
-              OriginalClusters = paste(op$merged_clusters, collapse=", "),
-              MergeTime = format(op$timestamp, "%H:%M:%S")
-            )
-          })
-          
-          # Add a header to separate merge history
-          population_data <- rbind(
-            population_data,
-            data.frame(
-              Cluster = "---",
-              Population = "--- Merge History ---",
+          pd <- rbind(pd, data.frame(Cluster = "---", Population = "--- Merge History ---",
+                                     Confidence = NA))
+          for (op in mergeHistory()$operations) {
+            pd <- rbind(pd, data.frame(
+              Cluster    = op$target_cluster,
+              Population = paste0(op$new_name, " (from: ", paste(op$merged_clusters, collapse = ", "), ")"),
               Confidence = NA
-            )
-          )
-          
-          # Add merge history to the table
-          for (summary in merge_summary) {
-            population_data <- rbind(
-              population_data,
-              data.frame(
-                Cluster = summary$Cluster,
-                Population = paste0(summary$Population, " (from: ", summary$OriginalClusters, ")"),
-                Confidence = NA,
-                MergeTime = summary$MergeTime
-              )
-            )
+            ))
           }
         }
+        pd
       } else {
-        population_data <- clustering_results$populations()
+        clustering_results$populations()
       }
       
-      # Create datatable
-      DT::datatable(
-        population_data,
-        options = list(
-          pageLength = 10,
-          scrollX = TRUE
-        ),
-        caption = "Identified Cell Populations"
-      ) %>% formatRound(columns = "Confidence", digits = 2)
+      DT::datatable(population_data, options = list(pageLength = 10, scrollX = TRUE),
+                    caption = "Identified Cell Populations") %>%
+        formatRound(columns = "Confidence", digits = 2)
     })
     
-    # Download cluster table
     output$downloadClusterTable <- downloadHandler(
-      filename = function() {
-        paste0("cluster_results_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-      },
-      content = function(file) {
+      filename = function() paste0("cluster_results_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv"),
+      content  = function(file) {
         req(processedData())
         
-        # Check whether to use merged or original clusters
         if (mergeHistory()$active) {
-          cluster_ids <- mergeHistory()$current_clusters
+          cluster_ids     <- mergeHistory()$current_clusters
           population_data <- mergeHistory()$current_mapping
         } else if (!is.null(clustering_results$clustering_results())) {
-          cluster_ids <- clustering_results$clustering_results()$cluster_ids
+          cluster_ids     <- clustering_results$clustering_results()$cluster_ids
           population_data <- clustering_results$populations()
-        } else {
-          return(NULL)
-        }
+        } else return(NULL)
         
-        # Format cluster statistics
-        stats_df <- formatClusterStats(
-          cluster_ids = cluster_ids,
-          total_cells = nrow(processedData()$plot_data),
-          population_data = population_data
-        )
-        
-        # Write to CSV
+        stats_df <- formatClusterStats(cluster_ids   = cluster_ids,
+                                       total_cells   = nrow(processedData()$plot_data),
+                                       population_data = population_data)
         write.csv(stats_df, file, row.names = FALSE)
       }
     )
     
-    # Download processed data
     output$downloadProcessedData <- downloadHandler(
-      filename = function() {
-        paste0("processed_data_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-      },
-      content = function(file) {
+      filename = function() paste0("processed_data_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv"),
+      content  = function(file) {
         req(processedData())
-        
-        # Get processed data
         data <- processedData()$plot_data
         
-        # Add cluster information - use merged if available
         if (mergeHistory()$active) {
           data$Cluster <- as.factor(mergeHistory()$current_clusters)
-          
-          # Add population information if available
           if (!is.null(mergeHistory()$current_mapping)) {
-            # Create mapping of cluster IDs to population names
-            pop_mapping <- setNames(
-              mergeHistory()$current_mapping$Population,
-              mergeHistory()$current_mapping$Cluster
-            )
-            
-            # Add population column
+            pop_mapping  <- setNames(mergeHistory()$current_mapping$Population,
+                                     mergeHistory()$current_mapping$Cluster)
             data$Population <- pop_mapping[as.character(data$Cluster)]
           }
         } else if (!is.null(clustering_results$clustering_results())) {
           data$Cluster <- as.factor(clustering_results$clustering_results()$cluster_ids)
-          
-          # Add population information if available
           if (!is.null(clustering_results$populations())) {
-            # Create mapping of cluster IDs to population names
-            pop_mapping <- setNames(
-              clustering_results$populations()$Population,
-              clustering_results$populations()$Cluster
-            )
-            
-            # Add population column
+            pop_mapping  <- setNames(clustering_results$populations()$Population,
+                                     clustering_results$populations()$Cluster)
             data$Population <- pop_mapping[as.character(data$Cluster)]
           }
         }
         
-        # Write to CSV
         write.csv(data, file, row.names = FALSE)
       }
     )
     
-    # Add cluster merge modal
+    # ============================================================================
+    # CLUSTER MERGING
+    # ============================================================================
+    
     observeEvent(input$clustering$showMergeModal, {
       req(clustering_results$clustering_results())
       
-      # Get current state of clusters
-      if (mergeHistory()$active) {
-        # Use the current merged state
-        current_clusters <- mergeHistory()$current_clusters
-        population_data <- mergeHistory()$current_mapping
-      } else {
-        # Use original clusters
-        current_clusters <- clustering_results$clustering_results()$cluster_ids
-        population_data <- clustering_results$populations()
-      }
+      current_clusters <- if (mergeHistory()$active) mergeHistory()$current_clusters else
+        clustering_results$clustering_results()$cluster_ids
+      population_data  <- if (mergeHistory()$active) mergeHistory()$current_mapping else
+        clustering_results$populations()
       
-      # Get unique clusters and their names from current state
       unique_clusters <- unique(current_clusters)
       
-      # Create choices for checkboxes with friendly names - showing only available clusters
       cluster_choices <- setNames(
         as.character(unique_clusters),
         sapply(unique_clusters, function(c) {
@@ -3220,115 +2252,78 @@ rawDataModuleServer <- function(id, app_state) {
       
       showModal(modalDialog(
         title = "Merge Similar Clusters",
-        
-        # Create checkboxes for all currently available clusters
-        checkboxGroupInput(session$ns("clustersToMerge"), 
-                         "Select clusters to merge:", 
-                         choices = cluster_choices),
-        
-        textInput(session$ns("mergedClusterName"), "Name for merged cluster:", 
-                 value = "Merged Population"),
-        
-        # Add a note about the cumulative nature of merges
-        tags$div(
-          class = "help-block",
-          tags$b("Note:"), 
-          "This merge will be added to any previous merges. Use 'Reset to Original Clusters' to start over."
-        ),
-        
+        checkboxGroupInput(session$ns("clustersToMerge"), "Select clusters to merge:",
+                           choices = cluster_choices),
+        textInput(session$ns("mergedClusterName"), "Name for merged cluster:",
+                  value = "Merged Population"),
+        tags$div(class = "help-block",
+                 tags$b("Note:"),
+                 "This merge is cumulative. Use 'Reset to Original Clusters' to start over."),
         footer = tagList(
-          actionButton(session$ns("performMerge"), "Merge Clusters", 
-                      class = "btn-success"),
+          actionButton(session$ns("performMerge"), "Merge Clusters", class = "btn-success"),
           modalButton("Cancel")
         ),
-        
         size = "l"
       ))
     })
     
-    # Handle cluster merging
     observeEvent(input$performMerge, {
       req(input$clustersToMerge, length(input$clustersToMerge) >= 2)
       
-      # Get current state (either original or already-merged clusters)
-      if (mergeHistory()$active) {
-        # Start from current merged state
-        current_clusters <- mergeHistory()$current_clusters
-        current_mapping <- mergeHistory()$current_mapping
-      } else {
-        # Start from original clustering
-        current_clusters <- clustering_results$clustering_results()$cluster_ids
-        current_mapping <- clustering_results$populations()
-      }
+      current_clusters <- if (mergeHistory()$active) mergeHistory()$current_clusters else
+        clustering_results$clustering_results()$cluster_ids
+      current_mapping  <- if (mergeHistory()$active) mergeHistory()$current_mapping else
+        clustering_results$populations()
       
-      # Create a copy to modify
       new_clusters <- current_clusters
+      merged_id    <- min(as.numeric(input$clustersToMerge))
       
-      # Get lowest cluster ID from selection (to use as the merged ID)
-      merged_id <- min(as.numeric(input$clustersToMerge))
-      
-      # Change all selected clusters to the merged ID
       for (cluster_id in input$clustersToMerge) {
         new_clusters[current_clusters == cluster_id] <- merged_id
       }
       
-      # Create a copy of the current mapping to modify
       new_mapping <- current_mapping
-      
-      # Update name for the merged cluster
       new_mapping$Population[new_mapping$Cluster == merged_id] <- input$mergedClusterName
+      new_mapping <- new_mapping[
+        !(new_mapping$Cluster %in% setdiff(input$clustersToMerge, merged_id)), ]
       
-      # Remove rows for clusters that were merged (except the target)
-      new_mapping <- new_mapping[!(new_mapping$Cluster %in% setdiff(input$clustersToMerge, merged_id)), ]
-      
-      # Add this operation to history
-      current_history <- mergeHistory()
-      current_history$active <- TRUE
-      current_history$current_clusters <- new_clusters
-      current_history$current_mapping <- new_mapping
-      
-      # Add details of this merge operation
-      new_operation <- list(
-        timestamp = Sys.time(),
+      current_history                   <- mergeHistory()
+      current_history$active            <- TRUE
+      current_history$current_clusters  <- new_clusters
+      current_history$current_mapping   <- new_mapping
+      current_history$operations        <- c(current_history$operations, list(list(
+        timestamp       = Sys.time(),
         merged_clusters = input$clustersToMerge,
-        target_cluster = merged_id,
-        new_name = input$mergedClusterName
-      )
-      current_history$operations <- c(current_history$operations, list(new_operation))
+        target_cluster  = merged_id,
+        new_name        = input$mergedClusterName
+      )))
       
-      # Update merge history
       mergeHistory(current_history)
-      
       removeModal()
       
-      # Calculate how many clusters we have now
-      remaining_clusters <- length(unique(new_clusters))
-      total_merges <- length(current_history$operations)
-      
       showNotification(
-        paste0("Merged into '", input$mergedClusterName, "'. You now have ", 
-              remaining_clusters, " clusters (", total_merges, " merge operations)"), 
+        paste0("Merged into '", input$mergedClusterName, "'. ",
+               length(unique(new_clusters)), " clusters remaining (",
+               length(current_history$operations), " merge operations total)."),
         type = "default", duration = 5
       )
     })
     
-    # Reset clusters to original clustering
     observeEvent(input$clustering$resetMerging, {
-      # Reset merge history
-      mergeHistory(list(
-        active = FALSE,
-        operations = list(),
-        current_clusters = NULL,
-        current_mapping = NULL
-      ))
-      
+      mergeHistory(list(active = FALSE, operations = list(),
+                        current_clusters = NULL, current_mapping = NULL))
       showNotification("Restored original clusters", type = "default", duration = 3)
     })
     
-    # Return reactive values that might be needed by other modules
+    # ============================================================================
+    # MODULE RETURN
+    # ============================================================================
+    
     return(list(
-      processed_data = processedData,
+      processed_data     = processedData,
       clustering_results = clustering_results
     ))
-  })
-}
+  })   # closes moduleServer(id, function(input, output, session) {
+}      # closes rawDataModuleServer <- function(id, app_state) {
+    
+    
