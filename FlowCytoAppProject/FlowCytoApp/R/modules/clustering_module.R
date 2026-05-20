@@ -170,20 +170,20 @@ clusteringModuleServer <- function(id, input_data, app_state) {
         params <- list()
         
         if (method == "K-means") {
-          params$num_clusters <- input$numClusters
+          params$num_clusters <- max(2L, min(100L, as.integer(input$numClusters)))
         }
         else if (method == "DBSCAN") {
-          params$eps <- input$dbscanEps
-          params$minPts <- input$dbscanMinPts
+          params$eps    <- max(0.001, min(100, as.numeric(input$dbscanEps)))
+          params$minPts <- max(1L, min(1000L, as.integer(input$dbscanMinPts)))
         }
         else if (method == "FlowSOM") {
-          params$xdim <- input$som_xdim
-          params$ydim <- input$som_ydim
-          params$n_metaclusters <- input$som_clusters
-          params$rlen <- input$som_rlen
+          params$xdim         <- max(2L, min(20L, as.integer(input$som_xdim)))
+          params$ydim         <- max(2L, min(20L, as.integer(input$som_ydim)))
+          params$n_metaclusters <- max(2L, min(50L, as.integer(input$som_clusters)))
+          params$rlen         <- max(1L, min(1000L, as.integer(input$som_rlen)))
         }
         else if (method == "Phenograph") {
-          params$k <- input$phenoK
+          params$k <- max(5L, min(500L, as.integer(input$phenoK)))
         }
         
         # Run clustering

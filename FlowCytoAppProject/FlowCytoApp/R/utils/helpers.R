@@ -57,20 +57,64 @@ generateSampleId <- function(name, prefix = "sample_") {
   return(id)
 }
 
+# Safely evaluate a user-supplied gating expression without arbitrary code execution.
+# Walks the parsed AST and permits only: column names, numeric/logical literals,
+# comparison operators (>, <, >=, <=, ==, !=), logical operators (&, |, !, &&, ||),
+# and unary +/- on numeric literals.  Everything else is rejected.
+safeEvalGateExpr <- function(expr_str, df) {
+  expr_str <- trimws(expr_str)
+  if (!nzchar(expr_str) || nchar(expr_str) > 500) return(NULL)
+
+  parsed <- tryCatch(parse(text = expr_str), error = function(e) NULL)
+  if (is.null(parsed) || length(parsed) == 0) return(NULL)
+
+  allowed_cols <- colnames(df)
+  safe_binary  <- c(">", "<", ">=", "<=", "==", "!=", "&", "|", "&&", "||")
+  safe_unary   <- c("!", "-", "+")
+
+  is_safe <- function(node) {
+    if (is.numeric(node) || is.logical(node)) return(TRUE)
+    if (is.name(node)) return(as.character(node) %in% allowed_cols)
+    if (is.call(node)) {
+      fn   <- as.character(node[[1]])
+      args <- as.list(node)[-1]
+      if (fn %in% safe_binary) return(all(vapply(args, is_safe, logical(1))))
+      if (fn %in% safe_unary && length(args) == 1) return(is_safe(args[[1]]))
+      return(FALSE)
+    }
+    FALSE
+  }
+
+  if (!is_safe(parsed[[1]])) return(NULL)
+
+  tryCatch({
+    env    <- list2env(as.list(df), parent = emptyenv())
+    result <- eval(parsed[[1]], envir = env)
+    if (is.logical(result) && length(result) == nrow(df)) result else NULL
+  }, error = function(e) NULL)
+}
+
 # Function to safely read Excel or CSV files
 safeReadFile <- function(file_path, file_name = NULL) {
   if (is.null(file_name)) {
     file_name <- basename(file_path)
   }
-  
-  ext <- tools::file_ext(file_name)
-  
+
+  # Reject path traversal: strip to bare filename then validate characters
+  file_name <- basename(file_name)
+  if (!grepl("^[a-zA-Z0-9._\\- ]+$", file_name)) {
+    warning("Invalid filename detected")
+    return(NULL)
+  }
+
+  ext <- tolower(tools::file_ext(file_name))
+
   tryCatch({
     switch(ext,
            "xlsx" = read.xlsx(file_path),
-           "csv" = read.csv(file_path, stringsAsFactors = FALSE),
-           "tsv" = read.delim(file_path, stringsAsFactors = FALSE),
-           "txt" = read.delim(file_path, stringsAsFactors = FALSE),
+           "csv"  = read.csv(file_path, stringsAsFactors = FALSE),
+           "tsv"  = read.delim(file_path, stringsAsFactors = FALSE),
+           "txt"  = read.delim(file_path, stringsAsFactors = FALSE),
            stop("Unsupported file format")
     )
   }, error = function(e) {

@@ -126,11 +126,10 @@ cellIdentificationModuleServer <- function(id, data_reactive) {
         df <- df[ld >= input$liveDeadThreshold, ]
       }
       
-      # Custom expression
-      if (nzchar(input$customGate)) {
-        try({
-          df <- df[eval(parse(text = input$customGate), envir = df), ]
-        }, silent = TRUE)
+      # Custom expression — evaluated via safe AST validator (no arbitrary code exec)
+      if (nzchar(trimws(input$customGate))) {
+        filtered <- safeEvalGateExpr(input$customGate, df)
+        if (!is.null(filtered)) df <- df[filtered, ]
       }
       
       df

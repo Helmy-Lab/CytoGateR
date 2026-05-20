@@ -980,20 +980,20 @@ batchAnalysisModuleServer <- function(id, app_state) {
               params <- list()
               
               if (method == "K-means") {
-                params$num_clusters <- input$batchNumClusters
+                params$num_clusters <- max(2L, min(100L, as.integer(input$batchNumClusters)))
               }
               else if (method == "DBSCAN") {
-                params$eps <- input$batchDbscanEps
-                params$minPts <- input$batchDbscanMinPts
+                params$eps    <- max(0.001, min(100, as.numeric(input$batchDbscanEps)))
+                params$minPts <- max(1L, min(1000L, as.integer(input$batchDbscanMinPts)))
               }
               else if (method == "FlowSOM") {
-                params$xdim <- input$batchSomXdim
-                params$ydim <- input$batchSomYdim
-                params$n_metaclusters <- input$batchSomClusters
-                params$rlen <- input$batchSomRlen
+                params$xdim           <- max(2L, min(20L, as.integer(input$batchSomXdim)))
+                params$ydim           <- max(2L, min(20L, as.integer(input$batchSomYdim)))
+                params$n_metaclusters <- max(2L, min(50L, as.integer(input$batchSomClusters)))
+                params$rlen           <- max(1L, min(1000L, as.integer(input$batchSomRlen)))
               }
               else if (method == "Phenograph") {
-                params$k <- input$batchPhenoK
+                params$k <- max(5L, min(500L, as.integer(input$batchPhenoK)))
               }
               
               # Run the clustering algorithm

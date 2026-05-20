@@ -352,12 +352,16 @@ rawDataModuleServer <- function(id, app_state) {
     # Reactive values to store processed data and results
     rawFCS <- reactive({
       req(input$fcsFile)
-      ext <- tools::file_ext(input$fcsFile$name)
+
+      # Server-side extension allow-list (client-side accept= can be bypassed)
+      allowed_exts <- c("fcs", "csv", "tsv")
+      ext <- tolower(tools::file_ext(input$fcsFile$name))
+      validate(need(ext %in% allowed_exts, paste("Unsupported file type:", ext, "— allowed: fcs, csv, tsv")))
+
       switch(ext,
              "fcs" = read.FCS(input$fcsFile$datapath, transformation = FALSE),
              "csv" = fread(input$fcsFile$datapath),
-             "tsv" = fread(input$fcsFile$datapath, sep = "\t"),
-             stop("Unsupported file format")
+             "tsv" = fread(input$fcsFile$datapath, sep = "\t")
       )
     })
     
@@ -1163,19 +1167,20 @@ rawDataModuleServer <- function(id, app_state) {
       }
       
       # Capture all inputs BEFORE entering async context
+      # Server-side bounds enforce safe ranges regardless of UI constraints
       selected_markers <- input$selectedMarkers
       methods          <- input$methods
       do_transform     <- input$transform
-      cofactor         <- input$cofactor
-      n_events_sample  <- input$nEvents
-      perplexity       <- input$perplexity
+      cofactor         <- max(1, min(1000, as.numeric(input$cofactor)))
+      n_events_sample  <- max(100, min(500000, as.integer(input$nEvents)))
+      perplexity       <- max(5, min(500, as.numeric(input$perplexity)))
       use_bh           <- isTRUE(input$use_barnes_hut)
-      tsne_theta       <- if (use_bh) input$tsne_theta else 0.0
-      tsne_max_iter    <- input$tsne_max_iter
-      n_neighbors      <- input$n_neighbors
-      pca_components   <- input$pca_components
+      tsne_theta       <- if (use_bh) max(0, min(1, as.numeric(input$tsne_theta))) else 0.0
+      tsne_max_iter    <- max(100, min(5000, as.integer(input$tsne_max_iter)))
+      n_neighbors      <- max(2, min(200, as.integer(input$n_neighbors)))
+      pca_components   <- max(2, min(50, as.integer(input$pca_components)))
       perform_qc       <- isTRUE(input$performQC)
-      max_anomalies    <- input$maxAnomalies
+      max_anomalies    <- max(0, min(100, as.numeric(input$maxAnomalies)))
       
       showNotification("Analysis running...", id = "run_msg", duration = NULL)
       

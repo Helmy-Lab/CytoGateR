@@ -336,7 +336,8 @@ processedDataModuleServer <- function(id, app_state) {
         
         # Run clustering
         incProgress(0.7, detail = "Clustering data...")
-        cluster_labels <- as.factor(kmeans(df_sel, centers = min(input$n_clusters, nrow(df_sel)), nstart = 10)$cluster)
+        k_safe <- max(2L, min(100L, as.integer(input$n_clusters)))
+        cluster_labels <- as.factor(kmeans(df_sel, centers = min(k_safe, nrow(df_sel)), nstart = 10)$cluster)
         
         # Create final results data frame
         dimred_df <- data.frame(Dim1 = dimred[,1], Dim2 = dimred[,2], 
