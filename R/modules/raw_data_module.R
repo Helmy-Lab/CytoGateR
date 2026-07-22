@@ -933,6 +933,50 @@ rawDataModuleServer <- function(id, app_state) {
     })
 
     # ==========================================================================
+    # QC OVERRIDE CONFIRMATION (Framework 2.2)
+    #
+    # QC defaults to on. Disabling it is allowed, but only after the user
+    # explicitly confirms -- unchecking the box alone must not silently turn
+    # QC off.
+    # ==========================================================================
+    qcOverrideConfirmed <- reactiveVal(TRUE)
+
+    observeEvent(input$performQC, {
+      if (!isTRUE(input$performQC)) {
+        qcOverrideConfirmed(FALSE)
+        showModal(modalDialog(
+          title = tagList(icon("exclamation-triangle"), "Disable Quality Control?"),
+          div(
+            p("Time-based QC (flowAI) flags acquisition anomalies -- flow-rate ",
+              "irregularities, signal drift, and out-of-range events -- before ",
+              "the data reaches any downstream analysis."),
+            p(strong("Disabling QC means unfiltered, unreviewed events will be ",
+                      "analysed and reported."))
+          ),
+          footer = tagList(
+            actionButton(session$ns("cancelDisableQC"), "Keep QC Enabled", class = "btn-primary"),
+            actionButton(session$ns("confirmDisableQC"), "Disable QC", class = "btn-danger")
+          ),
+          easyClose = FALSE
+        ))
+      } else {
+        qcOverrideConfirmed(TRUE)
+      }
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$confirmDisableQC, {
+      qcOverrideConfirmed(TRUE)
+      removeModal()
+      showNotification("Quality control disabled for this session.", type = "warning", duration = 6)
+    })
+
+    observeEvent(input$cancelDisableQC, {
+      updateCheckboxInput(session, "performQC", value = TRUE)
+      qcOverrideConfirmed(TRUE)
+      removeModal()
+    })
+
+    # ==========================================================================
     # QC SUMMARY PANEL (Framework 2.2)
     # ==========================================================================
 
