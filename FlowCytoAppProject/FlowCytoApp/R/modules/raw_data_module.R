@@ -163,6 +163,38 @@ rawDataModuleUI <- function(id) {
       
       # Main Analysis Panel - Enhanced with shinydashboard boxes
       column(9,
+        # ----------------------------------------------------------------------
+        # QC Summary Panel (Framework 2.2)
+        # Placed above the analysis outputs so QC status is visible immediately
+        # after file load and before any analysis is interpreted.
+        # ----------------------------------------------------------------------
+        shinydashboard::box(
+          title = "Quality Control Summary", status = "warning", solidHeader = TRUE,
+          width = 12, collapsible = TRUE,
+
+          uiOutput(ns("qcStatusBanner")),
+
+          DT::dataTableOutput(ns("qcSummaryTable")),
+
+          tags$hr(),
+          fluidRow(
+            column(7,
+              tags$small(
+                style = "color:#6c757d;",
+                tags$strong("Tested limits: "),
+                "verified up to 500 MB per FCS file and ~1,000,000 events on ",
+                "16 GB RAM. Larger files may load but are not performance-tested."
+              )
+            ),
+            column(5,
+              downloadButton(ns("downloadQCReport"),
+                             "Download flowAI anomaly report",
+                             class = "btn-sm btn-outline-secondary",
+                             style = "width:100%;")
+            )
+          )
+        ),
+
         # Dimensionality Reduction Visualizations
         shinydashboard::box(
           title = "Dimensionality Reduction Visualizations", status = "primary", solidHeader = TRUE,
@@ -899,6 +931,126 @@ rawDataModuleServer <- function(id, app_state) {
         numericInput(session$ns("maxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
       }
     })
+
+    # ==========================================================================
+    # QC SUMMARY PANEL (Framework 2.2)
+    # ==========================================================================
+
+    # Local module state (6.6 Isolated Module State).
+    qcState <- reactiveVal(list(
+      metrics = NULL, status = NULL, error = NULL,
+      livedead = NULL, sample_name = NULL, report_path = NULL
+    ))
+
+    # Shared report directory created in the MAIN process. The multisession
+    # worker has its own tempdir(), so a path created inside the future would
+    # not reliably be readable here. Passing an explicit path avoids that.
+    qcReportDir <- file.path(tempdir(), paste0("cytogater_qc_", session$token))
+    dir.create(qcReportDir, showWarnings = FALSE, recursive = TRUE)
+
+    # Reset QC state whenever a new file is chosen, so a previous sample's
+    # status can never be mistaken for the current one.
+    observeEvent(input$fcsFile, {
+      qcState(list(
+        metrics = NULL, status = NULL, error = NULL,
+        livedead = NULL, sample_name = input$fcsFile$name, report_path = NULL
+      ))
+    }, ignoreInit = TRUE)
+
+    # Status banner - the visible surface required by 2.2 / 6.4.
+    output$qcStatusBanner <- renderUI({
+      st <- qcState()
+
+      if (is.null(input$fcsFile)) {
+        return(div(class = "alert alert-light",
+                   style = "border-left:4px solid #6c757d;",
+                   icon("upload"), " Upload a file to see its QC summary."))
+      }
+
+      if (!isTRUE(input$performQC)) {
+        return(div(class = "alert alert-warning",
+                   style = "border-left:4px solid #fd7e14;",
+                   icon("exclamation-triangle"),
+                   tags$strong(" Quality control is disabled. "),
+                   "Time-based QC has not been applied to this sample. ",
+                   "Results are based on unfiltered data."))
+      }
+
+      if (identical(st$status, QC_STATUS$ERROR)) {
+        return(div(class = "alert alert-danger",
+                   style = "border-left:4px solid #dc3545;",
+                   icon("times-circle"), tags$strong(" QC failed. "),
+                   st$error))
+      }
+
+      if (identical(st$status, QC_STATUS$WARN)) {
+        return(div(class = "alert alert-warning",
+                   style = "border-left:4px solid #fd7e14;",
+                   icon("exclamation-triangle"), tags$strong(" QC passed with warnings. "),
+                   sprintf("%.1f%% of events were flagged as anomalous.",
+                           (st$metrics$removed_pct %||% 0) * 100)))
+      }
+
+      if (identical(st$status, QC_STATUS$PASS)) {
+        return(div(class = "alert alert-success",
+                   style = "border-left:4px solid #28a745;",
+                   icon("check-circle"), tags$strong(" QC passed. "),
+                   sprintf("%.1f%% of events removed by time-based QC.",
+                           (st$metrics$removed_pct %||% 0) * 100)))
+      }
+
+      div(class = "alert alert-light", style = "border-left:4px solid #6c757d;",
+          icon("clock"), " QC has not run yet. Click ", tags$strong("Run Analysis"),
+          " to apply quality control to this sample.")
+    })
+
+    # Per-sample QC summary table (the four rows specified in 2.2).
+    output$qcSummaryTable <- DT::renderDataTable({
+      st <- qcState()
+      tbl <- buildQCSummaryTable(
+        qc_metrics  = st$metrics,
+        qc_status   = st$status,
+        livedead    = st$livedead,
+        sample_name = st$sample_name %||% "sample"
+      )
+      tbl$Status <- vapply(tbl$Status, function(s) {
+        if (identical(s, EM_DASH)) EM_DASH else qcStatusBadge(s)
+      }, character(1))
+
+      DT::datatable(
+        tbl,
+        rownames  = FALSE,
+        escape    = FALSE,           # required for the status badges / em dashes
+        colnames  = c("Metric", "Events", "% of Loaded", "Status"),
+        options   = list(dom = "t", ordering = FALSE, paging = FALSE)
+      )
+    })
+
+    # flowAI anomaly report download (2.2).
+    output$downloadQCReport <- downloadHandler(
+      filename = function() {
+        base <- tools::file_path_sans_ext(qcState()$sample_name %||% "sample")
+        paste0(gsub("[^A-Za-z0-9_.-]", "_", base), "_flowAI_QC_report.html")
+      },
+      content = function(file) {
+        path <- qcState()$report_path
+        if (is.null(path) || !file.exists(path)) {
+          # No silent empty file - explain why there is nothing to download.
+          writeLines(c(
+            "<html><body style='font-family:sans-serif;padding:2em;'>",
+            "<h3>No flowAI anomaly report available</h3>",
+            "<p>A report is generated only after quality control has run",
+            "successfully on an FCS file. Run the analysis with",
+            "'Perform Quality Control' enabled, then download again.</p>",
+            "</body></html>"
+          ), file)
+          showNotification("No QC report available yet - run QC first.",
+                           type = "warning", duration = 6)
+          return(invisible(NULL))
+        }
+        file.copy(path, file, overwrite = TRUE)
+      }
+    )
     
     
     
@@ -1181,6 +1333,8 @@ rawDataModuleServer <- function(id, app_state) {
       pca_components   <- max(2, min(50, as.integer(input$pca_components)))
       perform_qc       <- isTRUE(input$performQC)
       max_anomalies    <- max(0, min(100, as.numeric(input$maxAnomalies)))
+      qc_sample_name   <- input$fcsFile$name
+      qc_report_dir    <- qcReportDir
       
       showNotification("Analysis running...", id = "run_msg", duration = NULL)
       
@@ -1202,7 +1356,12 @@ rawDataModuleServer <- function(id, app_state) {
             spillover_matrix     = NULL,
             scale_data           = TRUE,
             seed                 = 123,
-            qc_settings          = if (perform_qc) list(max_anomalies = max_anomalies / 100) else NULL
+            qc_settings          = if (perform_qc) list(
+                                       max_anomalies = max_anomalies / 100,
+                                       sample_name   = qc_sample_name,
+                                       report_dir    = qc_report_dir,
+                                       write_report  = TRUE
+                                     ) else NULL
           )
           
           preprocessing_results <- preprocessFlowData(raw_data, preprocessing_params)
@@ -1296,6 +1455,19 @@ rawDataModuleServer <- function(id, app_state) {
           results$raw_data <- flowSet(results$raw_data)
         }
         
+        # Populate the QC summary panel from the pipeline metrics (2.2).
+        qc_metrics <- results$metrics$qc
+        if (!is.null(qc_metrics)) {
+          qcState(list(
+            metrics     = qc_metrics,
+            status      = qc_metrics$status %||% QC_STATUS$PASS,
+            error       = NULL,
+            livedead    = results$metrics$livedead,
+            sample_name = qc_metrics$sample_name %||% isolate(input$fcsFile$name),
+            report_path = qc_metrics$report_path
+          ))
+        }
+
         processedData(results)
         removeNotification("run_msg")
         
@@ -1315,8 +1487,20 @@ rawDataModuleServer <- function(id, app_state) {
         # loading spinner spins indefinitely with no feedback.
       }) %...!% (function(err) {
         removeNotification("run_msg")
+        msg <- conditionMessage(err)
+
+        # QC failures are recorded in the panel as well as notified, so the
+        # reason persists after the toast disappears (6.4 No Silent Fallbacks).
+        if (grepl("quality control|time-based QC|anomalous|QC failed",
+                  msg, ignore.case = TRUE)) {
+          cur <- qcState()
+          cur$status <- QC_STATUS$ERROR
+          cur$error  <- msg
+          qcState(cur)
+        }
+
         showNotification(
-          paste("Analysis failed:", conditionMessage(err)),
+          paste("Analysis failed:", msg),
           type = "error", duration = 10
         )
       })
