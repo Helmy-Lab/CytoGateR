@@ -86,6 +86,18 @@ batchAnalysisModuleUI <- function(id) {
             )
           ),
           
+          # Normalisation & Batch Correction Section (Framework §2.3)
+          shinydashboard::box(
+            title = "Normalisation & Batch Correction", status = "danger", solidHeader = TRUE,
+            width = 12, collapsible = TRUE, collapsed = TRUE,
+            div(class = "parameter-group",
+              h5(icon("balance-scale"), "Cross-sample normalisation"),
+              checkboxInput(ns("batchNormalize"),
+                            "Apply gaussNorm (align samples to a reference)",
+                            value = FALSE),
+              uiOutput(ns("batchNormalizationUI"))
+            )
+          ),
           # Preprocessing Section
           shinydashboard::box(
             title = "Preprocessing", status = "warning", solidHeader = TRUE,
@@ -193,6 +205,10 @@ batchAnalysisModuleUI <- function(id) {
                                  class = "btn-success",
                                  icon = icon("save"),
                                  style = "width: 100%; margin-bottom: 10px;"),
+                  downloadButton(ns("downloadNormalizationParams"), "Save Normalisation Params",
+                                 class = "btn-info",
+                                 icon = icon("sliders-h"),
+                                 style = "width: 100%; margin-bottom: 10px;"),
                   fileInput(ns("uploadSampleConfig"), "Load Config",
                             accept = c(".csv"),
                             buttonLabel = "Browse",
@@ -203,6 +219,7 @@ batchAnalysisModuleUI <- function(id) {
               
               tabPanel("Sample Visualization",
                 br(),
+                uiOutput(ns("batchNormalizationStatus")),
                 # Sample Selection
                 shinydashboard::box(
                   title = "Sample Selection", status = "primary", solidHeader = TRUE,
@@ -294,6 +311,18 @@ batchAnalysisModuleUI <- function(id) {
 batchAnalysisModuleServer <- function(id, app_state) {
   moduleServer(id, function(input, output, session) {
     
+    # Session cleanup handler (Framework 2.1): flags the session as closed so
+    # any future_promise() result that resolves after disconnect is discarded
+    # instead of writing to dead reactives, and logs the disconnect reason.
+    session_closed <- FALSE
+    session$onSessionEnded(function() {
+      session_closed <<- TRUE
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+    })
+    
     # ============================================================================
     # SERVER-SIDE CONDITIONAL UI RENDERING
     # ============================================================================
@@ -337,6 +366,52 @@ batchAnalysisModuleServer <- function(id, app_state) {
         numericInput(session$ns("batchMaxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
       }
     })
+
+    # §2.3 — reference-sample selector (dynamic: reflects uploaded samples)
+    output$batchNormalizationUI <- renderUI({
+      if (!isTRUE(input$batchNormalize)) return(NULL)
+      samples <- batchSamples()
+      if (length(samples) == 0) {
+        return(helpText(icon("exclamation-triangle"),
+                        "Upload samples first, then choose a reference."))
+      }
+      choices <- setNames(names(samples), sapply(samples, function(s) s$name))
+      tagList(
+        selectInput(session$ns("batchReferenceSample"), "Reference sample", choices = choices),
+        numericInput(session$ns("batchNormMaxLms"), "Max landmarks per channel",
+                     value = 2, min = 1, max = 5, step = 1),
+        helpText("All other samples are aligned to the reference via gaussNorm.")
+      )
+    })
+
+    # §2.3 [R4] — UI status statement
+    output$batchNormalizationStatus <- renderUI({
+      np <- batchNormParams()
+      if (is.null(np)) {
+        div(class = "parameter-group",
+            style = "background-color:#fff3cd;border-left:4px solid #ffc107;",
+            icon("info-circle"),
+            " No cross-sample normalisation applied. For multi-batch data, enable normalisation above.")
+      } else {
+        div(class = "parameter-group",
+            style = "background-color:#e8f5e9;border-left:4px solid #4caf50;",
+            icon("check-circle"),
+            sprintf(" gaussNorm applied. Reference: %s  ·  Channels: %d  ·  Max landmarks: %s",
+                    np$reference, length(np$channels), np$max_landmarks))
+      }
+    })
+
+    # §2.3 [R3] — export normalisation parameters as JSON (jsonlite ships with shiny)
+    output$downloadNormalizationParams <- downloadHandler(
+      filename = function() paste0("normalisation_params_",
+                                   format(Sys.time(), "%Y%m%d_%H%M%S"), ".json"),
+      content = function(file) {
+        np <- batchNormParams()
+        payload <- if (is.null(np)) list(normalisation_applied = FALSE)
+                   else c(list(normalisation_applied = TRUE), np)
+        writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE), file)
+      }
+    )
     
     # Gating parameters UI - COMMENTED OUT: Using dedicated gating module now
     # output$batchGatingParametersUI <- renderUI({
@@ -539,6 +614,7 @@ batchAnalysisModuleServer <- function(id, app_state) {
 
     # Create reactive values to store batch samples and their results
     batchSamples <- reactiveVal(list())
+    batchNormParams <- reactiveVal(NULL)   # §2.3 gaussNorm parameters (status + export)
     batchResults <- reactiveVal(list())
     
     # Add reactive values to track cluster merging
@@ -831,6 +907,16 @@ batchAnalysisModuleServer <- function(id, app_state) {
       }
       
       req(input$batchSelectedMarkers)
+
+      # §2.3 guard: normalisation needs a reference sample.
+      if (isTRUE(input$batchNormalize) &&
+          (is.null(input$batchReferenceSample) || !nzchar(input$batchReferenceSample))) {
+        showNotification(
+          "Select a reference sample for normalisation, or disable normalisation.",
+          type = "warning"
+        )
+        return()
+      }
       
       # Pre-computation guard: batch analysis loads and processes every
       # sample sequentially, so the wait scales with the number of samples.
@@ -884,7 +970,11 @@ batchAnalysisModuleServer <- function(id, app_state) {
         identify_pops    = isTRUE(input$batchIdentifyPops),
         high_threshold   = input$batchHighExpressionThreshold,
         low_threshold    = input$batchLowExpressionThreshold,
-        min_confidence   = input$batchMinConfidenceThreshold / 100
+        min_confidence   = input$batchMinConfidenceThreshold / 100,
+        # §2.3 cross-sample normalisation
+        normalize        = isTRUE(input$batchNormalize),
+        reference_id     = input$batchReferenceSample,
+        norm_max_lms     = if (is.null(input$batchNormMaxLms)) 2L else as.integer(input$batchNormMaxLms)
       )
       
       showNotification(
@@ -910,13 +1000,14 @@ batchAnalysisModuleServer <- function(id, app_state) {
           # inherit the main session's attached packages.
           library(flowCore); library(data.table); library(Rtsne); library(uwot)
           library(dbscan);   library(FlowSOM);    library(Rphenograph); library(igraph)
+          library(flowStats)  # §2.3 cross-sample normalisation
           
-          processSample <- function(sample, preprocessing_params, settings) {
+          reduceAndCluster <- function(sample, preprocess_results, settings, normalization_params) {
             # Load the file data
-            file_data <- loadFlowData(sample$path, sample$name)$data
+            # §2.3: file already loaded upstream (three-phase pipeline).
             
             # Process the data using the common parameters
-            preprocess_results <- preprocessFlowData(file_data, preprocessing_params)
+            # §2.3: preprocess_results supplied as an argument.
             
             # Perform dimensionality reduction
             if (settings$dim_red_method == "t-SNE") {
@@ -1019,6 +1110,8 @@ batchAnalysisModuleServer <- function(id, app_state) {
               cluster_results = cluster_results,
               populations = populations,
               dim_red_method = settings$dim_red_method,
+              normalized = isTRUE(settings$normalize),          # §2.3
+              normalization = normalization_params,             # §2.3
               num_cells = nrow(plot_data),
               processed_time = Sys.time()
             )
@@ -1027,11 +1120,53 @@ batchAnalysisModuleServer <- function(id, app_state) {
             sample_result
           }
           
-          out <- list()
+          # ── §2.3 THREE-PHASE PIPELINE ────────────────────────────────────
+          # Phase 1 — preprocess every sample WITHOUT scaling (scaling must run
+          # AFTER cross-sample normalisation). arcsinh still applies inside
+          # preprocessFlowData. Keep only sampled_data + metrics to bound memory
+          # while all samples are held at once for normalisation.
+          preprocessing_params$scale_data <- FALSE
+          preprocessed <- list()
           for (i in seq_along(samples)) {
-            sample <- samples[[i]]
-            out[[sample$id]] <- processSample(sample, preprocessing_params, batch_settings)
+            s  <- samples[[i]]
+            fd <- loadFlowData(s$path, s$name)$data
+            pr <- preprocessFlowData(fd, preprocessing_params)
+            preprocessed[[s$id]] <- list(
+              sample = s,
+              pr = list(
+                sampled_data    = pr$sampled_data,
+                sampled_indices = pr$sampled_indices,
+                metrics         = pr$metrics
+              )
+            )
+            rm(fd, pr); gc(verbose = FALSE)
           }
+
+          # Phase 2 — optional cross-sample normalisation to the reference.
+          normalization_params <- NULL
+          if (isTRUE(batch_settings$normalize)) {
+            norm <- applyGaussNorm(
+              sampled_list = lapply(preprocessed, function(x) x$pr$sampled_data),
+              markers      = batch_settings$selected_markers,
+              reference_id = batch_settings$reference_id,
+              max_lms      = batch_settings$norm_max_lms
+            )
+            for (sid in names(preprocessed)) {
+              preprocessed[[sid]]$pr$sampled_data <- norm$normalized[[sid]]
+            }
+            normalization_params <- norm$params
+          }
+
+          # Phase 3 — scale (post-normalisation) then DR + clustering.
+          out <- list()
+          for (sid in names(preprocessed)) {
+            s  <- preprocessed[[sid]]$sample
+            pr <- preprocessed[[sid]]$pr
+            pr$scaled_data <- scale(pr$sampled_data)   # mirrors preprocessFlowData Step 6
+            out[[sid]] <- reduceAndCluster(s, pr, batch_settings, normalization_params)
+            preprocessed[[sid]] <- NULL; gc(verbose = FALSE)
+          }
+          attr(out, "normalization") <- normalization_params
           out
           
         }, error = function(e) {
@@ -1041,8 +1176,13 @@ batchAnalysisModuleServer <- function(id, app_state) {
         # Promise success handler -- back on the main Shiny thread. Only here
         # is it safe to write to reactiveVal() / update the UI.
       }) %...>% (function(results) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
         
         batchResults(results)
+        batchNormParams(attr(results, "normalization"))   # §2.3
         removeNotification("batch_msg")
         
         # Update sample selection dropdown for visualization
@@ -1099,6 +1239,11 @@ batchAnalysisModuleServer <- function(id, app_state) {
         # future_promise() so the user gets visible feedback instead of a
         # spinner that never resolves.
       }) %...!% (function(err) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+
+          return(invisible(NULL))
+        }
         removeNotification("batch_msg")
         showNotification(
           paste("Batch analysis failed:", conditionMessage(err)),
