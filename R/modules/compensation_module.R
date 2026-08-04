@@ -94,6 +94,15 @@ compensationModuleUI <- function(id) {
                 icon("check-circle"), 
                 strong(" Supported formats: "), 
                 "Standard (FL1-A, FL2-H), FJComp (FJComp-A, FJComp-H), and other naming conventions"),
+
+            # §2.4 [S2]/[S4]: spectral-file warning (rendered when a spectral file is uploaded)
+            uiOutput(ns("spectral_warning")),
+
+            div(class = "alert alert-light", style = "margin-top: 8px; font-size: 12px;",
+                icon("circle-exclamation"),
+                strong(" Scope: "),
+                "This module performs conventional spillover compensation only. ",
+                "Spectral flow data must be unmixed upstream (instrument software or CATALYST) before import."),
                             
                             # File validation status
                             shinycssloaders::withSpinner(
@@ -908,6 +917,21 @@ compensationModuleServer <- function(id, app_state) {
       }
     })
     
+    # §2.4 [S1]/[S2]: flag spectral files on upload (metadata-only read per file).
+    output$spectral_warning <- renderUI({
+      req(input$fcs_files)
+      flags <- lapply(input$fcs_files$datapath, detectSpectralFile)
+      spectral_idx <- which(vapply(flags, function(f) isTRUE(f$is_spectral), logical(1)))
+      if (length(spectral_idx) == 0) return(NULL)
+      spectral_names <- input$fcs_files$name[spectral_idx]
+      div(class = "alert alert-warning", style = "margin-top: 10px;",
+          icon("triangle-exclamation"),
+          strong(" Spectral file detected. "),
+          SPECTRAL_WARNING_TEXT,
+          tags$ul(lapply(spectral_names, function(n) tags$li(n)))
+      )
+    })
+
     # Render file validation output - ENHANCED VERSION
     output$file_validation <- renderText({
       req(input$fcs_files)
@@ -2788,6 +2812,19 @@ computeCompensatedFiles <- function(spillover_matrix, uploaded_names, uploaded_d
 
   for (i in experimental_file_indices) {
     ff <- read.FCS(uploaded_datapaths[i], transformation = FALSE)
+
+    # §2.4 [S3]: never apply spillover compensation to a spectral file.
+    # Recorded through the existing compatibility-report path so the skip is visible.
+    if (isTRUE(isSpectralFlowFrame(ff)$is_spectral)) {
+      compatibility_issues[[uploaded_names[i]]] <- createCompatibilityIssue(
+        channel_matches = list(),
+        file_channels   = colnames(ff),
+        matrix_channels = colnames(spillover_matrix),
+        error_message   = "Spectral file detected (>30 channels, no spillover keyword). Spillover compensation was NOT applied - unmix upstream (instrument software or CATALYST) before import."
+      )
+      message("Skipped spectral file (no compensation applied): ", uploaded_names[i])
+      next
+    }
 
     file_channels <- colnames(ff)
     matrix_channels <- colnames(spillover_matrix)

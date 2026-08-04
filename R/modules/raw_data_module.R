@@ -61,6 +61,13 @@ rawDataModuleUI <- function(id) {
           
           helpText(icon("info-circle"), 
                    "Supported formats: FCS files, CSV, and TSV data files."),
+
+          # §2.4 [H3]: visible tested-limits statement.
+          div(class = "alert alert-info", style = "margin-top: 8px; font-size: 12px;",
+              icon("microchip"), strong(" Tested limits: "),
+              "files with more than 500,000 events are automatically subsampled on load to protect memory. ",
+              "Maximum panel size and total event count are benchmarked on the deployment hardware - ",
+              "see Methods. Replace the figures here once you have run the §7 benchmark on your machine."),
           
           # Marker Selection UI
           uiOutput(ns("markerSelectUI"))
@@ -396,66 +403,84 @@ rawDataModuleServer <- function(id, app_state) {
       validate(need(ext %in% allowed_exts, paste("Unsupported file type:", ext, "— allowed: fcs, csv, tsv")))
 
       switch(ext,
-             "fcs" = read.FCS(input$fcsFile$datapath, transformation = FALSE),
+             # §2.4 [H2]: strided load caps events held in memory for large files.
+             "fcs" = readFCSchunked(input$fcsFile$datapath)$ff,
              "csv" = fread(input$fcsFile$datapath),
              "tsv" = fread(input$fcsFile$datapath, sep = "\t")
       )
+    })
+
+    # §2.4 [H1]: metadata-only reactive (channels/keywords, 1 event). Drives the
+    # channel list and file-info panels so the FULL event matrix is not loaded
+    # until an event consumer (Run Analysis / event plots) actually runs.
+    fcsMeta <- reactive({
+      req(input$fcsFile)
+      ext <- tolower(tools::file_ext(input$fcsFile$name))
+      if (ext == "fcs") {
+        readFCSmetadata(input$fcsFile$datapath)
+      } else {
+        fread(input$fcsFile$datapath,
+              sep = if (ext == "tsv") "\t" else "auto", nrows = 5)
+      }
     })
     
     # Show raw data information
     output$fcsInfo <- renderPrint({
       req(input$fcsFile)
-      fcs <- rawFCS()
+      meta <- fcsMeta()                              # §2.4 [H1]: metadata only, no full load
       cat("File name: ", input$fcsFile$name, "\n")
-      cat("Dimensions: ", paste(dim(fcs), collapse = " x "), "\n")
-      
-      if (inherits(fcs, "flowFrame")) {
+
+      if (inherits(meta, "flowFrame")) {
+        n_total <- fcsEventCount(meta)
+        cat("Total events: ", format(n_total, big.mark = ","),
+            "  |  Channels: ", ncol(meta), "\n")
+        if (!is.na(n_total) && n_total > 500000) {
+          cat("Note: large file - events will be subsampled to ~500,000 on load ",
+              "for memory safety (see Tested limits).\n")
+        }
+
         cat("\nParameters (Parameter Name -> Marker Description):\n")
         cat(paste(rep("=", 60), collapse = ""), "\n")
-        
-        params <- parameters(fcs)
+
+        params <- parameters(meta)
         param_info <- data.frame(
           Parameter = params$name,
           Description = params$desc,
           stringsAsFactors = FALSE
         )
-        
-        # Clean up descriptions and show mapping
+
         for (i in 1:nrow(param_info)) {
           param_name <- param_info$Parameter[i]
           param_desc <- param_info$Description[i]
-          
           if (is.na(param_desc) || param_desc == "") {
             param_desc <- "(No description)"
           }
-          
-          # Highlight fluorescence channels
           if (grepl("^(FSC|SSC|Time|Width|Height)", param_name)) {
             cat(sprintf("  %-8s -> %s (Scatter/Time)\n", param_name, param_desc))
           } else {
             cat(sprintf("  %-8s -> %s *** FLUORESCENCE ***\n", param_name, param_desc))
           }
         }
-        
+
         cat("The parameter names ($P1N, $P2N, etc.) are internal identifiers.\n")
         cat("The descriptions show the actual marker names (e.g., CD3-FITC, CD4-PE).\n")
       } else {
-        cat("Column names:\n")
-        print(colnames(fcs))
+        cat("Columns (preview):\n")
+        print(colnames(meta))
       }
     })
     
     # Dynamic marker selection UI
     output$markerSelectUI <- renderUI({
-      req(rawFCS())
-      
+      req(fcsMeta())                                  # §2.4 [H1]: channel list from metadata, before full load
+
       # Get marker choices based on data type
-      if (inherits(rawFCS(), "flowFrame")) {
-        fcs_data <- rawFCS()
+      if (inherits(fcsMeta(), "flowFrame")) {
+        fcs_data <- fcsMeta()
         params <- parameters(fcs_data)
         parameter_names <- colnames(exprs(fcs_data))
         parameter_descriptions <- params$desc[match(parameter_names, params$name)]
-        
+
         # Create choices with format: "Parameter Name - Description"
         choices <- setNames(
           parameter_names,
@@ -469,20 +494,20 @@ rawDataModuleServer <- function(id, app_state) {
             }
           })
         )
-        
+
         # Filter to show only fluorescence channels by default, but allow all
         fluorescence_channels <- choices[!grepl("^(FSC|SSC|Time|Width|Height)", names(choices))]
         default_selection <- names(fluorescence_channels)[1:min(5, length(fluorescence_channels))]
-        
+
       } else {
-        exprs_data <- rawFCS()
+        exprs_data <- fcsMeta()
         choices <- colnames(exprs_data)
         default_selection <- choices[1:min(5, length(choices))]
       }
-      
-      selectInput(session$ns("selectedMarkers"), "Select Markers/Channels", 
-                  choices = choices, 
-                  selected = default_selection, 
+
+      selectInput(session$ns("selectedMarkers"), "Select Markers/Channels",
+                  choices = choices,
+                  selected = default_selection,
                   multiple = TRUE)
     })
     
