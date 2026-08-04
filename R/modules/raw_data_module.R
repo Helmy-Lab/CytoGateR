@@ -377,8 +377,13 @@ rawDataModuleServer <- function(id, app_state) {
   moduleServer(id, function(input, output, session) {
     # Session cleanup handler — ensures any running futures are logged when the
     # browser disconnects.
+    session_closed <- FALSE
     session$onSessionEnded(function() {
-      message("[CytoGateR] Session ended for module: ", id)
+      session_closed <<- TRUE
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
     })
     
     # Reactive values to store processed data and results
@@ -1472,6 +1477,10 @@ rawDataModuleServer <- function(id, app_state) {
         # future completes. Only here is it safe to write to reactiveVal() and
         # update the UI. Do not move reactive writes inside future_promise() above.
       }) %...>% (function(results) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
         
         plot_data <- as.data.frame(results$sampled_data)
         colnames(plot_data) <- results$markers
@@ -1530,6 +1539,12 @@ rawDataModuleServer <- function(id, app_state) {
         # and surfaces it to the user. Without this, failures are silent and the
         # loading spinner spins indefinitely with no feedback.
       }) %...!% (function(err) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+
+
+          return(invisible(NULL))
+        }
         removeNotification("run_msg")
         msg <- conditionMessage(err)
 
@@ -2128,6 +2143,21 @@ rawDataModuleServer <- function(id, app_state) {
       },
       content = function(file) {
         req(processedData(), input$heatmapDimMethod)
+        
+        # Framework 2.1 note: this is intentionally NOT wrapped in
+        # future_promise(). Shiny's downloadHandler() content() function must
+        # write synchronously to `file` and return before the HTTP response
+        # can be sent -- it cannot await a promise. This loop is bounded by
+        # the number of markers selected (typically well under the ~90s
+        # disconnect timeout); the guard below warns the user if the marker
+        # count makes that unlikely.
+        if (length(processedData()$markers) > 40) {
+          showNotification(
+            paste0("Generating ", length(processedData()$markers),
+                   " marker plots -- this may take a while and cannot run in the background."),
+            type = "warning", duration = 8
+          )
+        }
         
         withProgress(message = "Generating high-resolution plots...", value = 0, {
           

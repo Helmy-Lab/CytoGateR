@@ -25,6 +25,18 @@ clusteringModuleUI <- function(id) {
 clusteringModuleServer <- function(id, input_data, app_state) {
   moduleServer(id, function(input, output, session) {
     
+    # Session cleanup handler (Framework 2.1): flags the session as closed so
+    # any future_promise() result that resolves after disconnect is discarded
+    # instead of writing to dead reactives, and logs the disconnect reason.
+    session_closed <- FALSE
+    session$onSessionEnded(function() {
+      session_closed <<- TRUE
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+    })
+    
     # Reactive values to store results
     clustering_results <- reactiveVal(NULL)
     populations <- reactiveVal(NULL)
@@ -250,6 +262,10 @@ clusteringModuleServer <- function(id, input_data, app_state) {
         # Promise success handler -- back on the main Shiny thread. Only here
         # is it safe to write to reactiveVal() / update the UI.
       }) %...>% (function(out) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
         
         clustering_results(out$cluster_result)
         populations(out$pop_result)
@@ -271,6 +287,12 @@ clusteringModuleServer <- function(id, input_data, app_state) {
         # future_promise() so the user gets visible feedback instead of a
         # spinner that never resolves.
       }) %...!% (function(err) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+
+
+          return(invisible(NULL))
+        }
         removeNotification("cluster_msg")
         showNotification(
           paste("Clustering failed:", conditionMessage(err)),

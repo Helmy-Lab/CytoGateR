@@ -698,6 +698,16 @@ gatingModuleServer <- function(id, app_state, raw_data_results) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
+    # Session cleanup handler (Framework 2.1): logs disconnect reason so
+    # support staff can distinguish a normal browser close from an
+    # unexpected drop while a gating job was running.
+    session$onSessionEnded(function() {
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+    })
+    
     # Reactive values
     values <- reactiveValues(
       current_gs = NULL,

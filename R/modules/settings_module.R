@@ -56,6 +56,15 @@ settingsModuleUI <- function(id) {
 settingsModuleServer <- function(id, app_state) {
   moduleServer(id, function(input, output, session) {
     
+    # Session cleanup handler (Framework 2.1): logs disconnect reason for
+    # this module.
+    session$onSessionEnded(function() {
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+    })
+    
     # Create a preview plot based on current settings
     output$settings_preview <- renderPlot({
       # Create sample data

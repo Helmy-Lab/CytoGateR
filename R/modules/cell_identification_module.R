@@ -48,6 +48,15 @@ cellIdentificationModuleServer <- function(id, data_reactive) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
+    # Session cleanup handler (Framework 2.1): logs disconnect reason for
+    # this module.
+    session$onSessionEnded(function() {
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+    })
+    
     # ============================================================================
     # SERVER-SIDE CONDITIONAL UI RENDERING
     # ============================================================================
