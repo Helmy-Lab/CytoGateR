@@ -1,3 +1,4 @@
+
 # Batch Analysis Module for Flow Cytometry Analysis Tool
 
 #' UI for the Batch Analysis Module
@@ -85,6 +86,18 @@ batchAnalysisModuleUI <- function(id) {
             )
           ),
           
+          # Normalisation & Batch Correction Section (Framework §2.3)
+          shinydashboard::box(
+            title = "Normalisation & Batch Correction", status = "danger", solidHeader = TRUE,
+            width = 12, collapsible = TRUE, collapsed = TRUE,
+            div(class = "parameter-group",
+              h5(icon("balance-scale"), "Cross-sample normalisation"),
+              checkboxInput(ns("batchNormalize"),
+                            "Apply gaussNorm (align samples to a reference)",
+                            value = FALSE),
+              uiOutput(ns("batchNormalizationUI"))
+            )
+          ),
           # Preprocessing Section
           shinydashboard::box(
             title = "Preprocessing", status = "warning", solidHeader = TRUE,
@@ -192,6 +205,10 @@ batchAnalysisModuleUI <- function(id) {
                                  class = "btn-success",
                                  icon = icon("save"),
                                  style = "width: 100%; margin-bottom: 10px;"),
+                  downloadButton(ns("downloadNormalizationParams"), "Save Normalisation Params",
+                                 class = "btn-info",
+                                 icon = icon("sliders-h"),
+                                 style = "width: 100%; margin-bottom: 10px;"),
                   fileInput(ns("uploadSampleConfig"), "Load Config",
                             accept = c(".csv"),
                             buttonLabel = "Browse",
@@ -202,6 +219,7 @@ batchAnalysisModuleUI <- function(id) {
               
               tabPanel("Sample Visualization",
                 br(),
+                uiOutput(ns("batchNormalizationStatus")),
                 # Sample Selection
                 shinydashboard::box(
                   title = "Sample Selection", status = "primary", solidHeader = TRUE,
@@ -293,6 +311,18 @@ batchAnalysisModuleUI <- function(id) {
 batchAnalysisModuleServer <- function(id, app_state) {
   moduleServer(id, function(input, output, session) {
     
+    # Session cleanup handler (Framework 2.1): flags the session as closed so
+    # any future_promise() result that resolves after disconnect is discarded
+    # instead of writing to dead reactives, and logs the disconnect reason.
+    session_closed <- FALSE
+    session$onSessionEnded(function() {
+      session_closed <<- TRUE
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+    })
+    
     # ============================================================================
     # SERVER-SIDE CONDITIONAL UI RENDERING
     # ============================================================================
@@ -318,14 +348,6 @@ batchAnalysisModuleServer <- function(id, app_state) {
             # QC parameters conditionally rendered
             uiOutput(session$ns("batchQCParametersUI"))
           ),
-          
-          # Gating options - COMMENTED OUT: Using dedicated gating module now
-          # div(class = "parameter-group",
-          #   h5(icon("filter"), "Cell Gating"),
-          #   checkboxInput(session$ns("batchPerformGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
-          #   # Gating parameters conditionally rendered
-          #   uiOutput(session$ns("batchGatingParametersUI"))
-          # )
         )
       }
     })
@@ -336,19 +358,52 @@ batchAnalysisModuleServer <- function(id, app_state) {
         numericInput(session$ns("batchMaxAnomalies"), "Max Anomalies (%)", value = 10, min = 0, max = 50)
       }
     })
-    
-    # Gating parameters UI - COMMENTED OUT: Using dedicated gating module now
-    # output$batchGatingParametersUI <- renderUI({
-    #   if (isTRUE(input$batchPerformGating)) {
-    #     tagList(
-    #       textInput(session$ns("batchDebrisGate"), "FSC/SSC Parameters (comma-separated)", 
-    #                 value = "FSC-A,SSC-A"),
-    #       selectInput(session$ns("batchLiveDeadGate"), "Live/Dead Parameter", 
-    #                   choices = c("None", "Live Dead BV570 Violet-610-A"),
-    #                   selected = "None")
-    #     )
-    #   }
-    # })
+
+    # §2.3 — reference-sample selector (dynamic: reflects uploaded samples)
+    output$batchNormalizationUI <- renderUI({
+      if (!isTRUE(input$batchNormalize)) return(NULL)
+      samples <- batchSamples()
+      if (length(samples) == 0) {
+        return(helpText(icon("exclamation-triangle"),
+                        "Upload samples first, then choose a reference."))
+      }
+      choices <- setNames(names(samples), sapply(samples, function(s) s$name))
+      tagList(
+        selectInput(session$ns("batchReferenceSample"), "Reference sample", choices = choices),
+        numericInput(session$ns("batchNormMaxLms"), "Max landmarks per channel",
+                     value = 2, min = 1, max = 5, step = 1),
+        helpText("All other samples are aligned to the reference via gaussNorm.")
+      )
+    })
+
+    # §2.3 [R4] — UI status statement
+    output$batchNormalizationStatus <- renderUI({
+      np <- batchNormParams()
+      if (is.null(np)) {
+        div(class = "parameter-group",
+            style = "background-color:#fff3cd;border-left:4px solid #ffc107;",
+            icon("info-circle"),
+            " No cross-sample normalisation applied. For multi-batch data, enable normalisation above.")
+      } else {
+        div(class = "parameter-group",
+            style = "background-color:#e8f5e9;border-left:4px solid #4caf50;",
+            icon("check-circle"),
+            sprintf(" gaussNorm applied. Reference: %s  ·  Channels: %d  ·  Max landmarks: %s",
+                    np$reference, length(np$channels), np$max_landmarks))
+      }
+    })
+
+    # §2.3 [R3] — export normalisation parameters as JSON (jsonlite ships with shiny)
+    output$downloadNormalizationParams <- downloadHandler(
+      filename = function() paste0("normalisation_params_",
+                                   format(Sys.time(), "%Y%m%d_%H%M%S"), ".json"),
+      content = function(file) {
+        np <- batchNormParams()
+        payload <- if (is.null(np)) list(normalisation_applied = FALSE)
+                   else c(list(normalisation_applied = TRUE), np)
+        writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE), file)
+      }
+    )
     
     # Batch dimensionality reduction parameters UI
     output$batchDimReductionParametersUI <- renderUI({
@@ -538,6 +593,7 @@ batchAnalysisModuleServer <- function(id, app_state) {
 
     # Create reactive values to store batch samples and their results
     batchSamples <- reactiveVal(list())
+    batchNormParams <- reactiveVal(NULL)   # §2.3 gaussNorm parameters (status + export)
     batchResults <- reactiveVal(list())
     
     # Add reactive values to track cluster merging
@@ -830,6 +886,25 @@ batchAnalysisModuleServer <- function(id, app_state) {
       }
       
       req(input$batchSelectedMarkers)
+
+      # §2.3 guard: normalisation needs a reference sample.
+      if (isTRUE(input$batchNormalize) &&
+          (is.null(input$batchReferenceSample) || !nzchar(input$batchReferenceSample))) {
+        showNotification(
+          "Select a reference sample for normalisation, or disable normalisation.",
+          type = "warning"
+        )
+        return()
+      }
+      
+      # Pre-computation guard: batch analysis loads and processes every
+      # sample sequentially, so the wait scales with the number of samples.
+      if (length(samples) > 10) {
+        showNotification(
+          paste0(length(samples), " samples queued. Batch analysis may take several minutes."),
+          type = "warning", duration = 8
+        )
+      }
       
       # Prepare common preprocessing parameters
       preprocessing_params <- list(
@@ -838,7 +913,6 @@ batchAnalysisModuleServer <- function(id, app_state) {
         cofactor = input$batchCofactor,
         n_events = input$batchEvents,
         perform_qc = isTRUE(input$batchPerformQC),
-        # perform_gating = isTRUE(input$batchPerformGating),  # COMMENTED OUT: Using dedicated gating module
         perform_gating = FALSE,  # Disabled - using dedicated gating module
         scale_data = TRUE,
         seed = 123
@@ -851,192 +925,161 @@ batchAnalysisModuleServer <- function(id, app_state) {
         )
       }
       
-      # Add gating parameters if enabled - COMMENTED OUT: Using dedicated gating module
-      # if (isTRUE(input$batchPerformGating)) {
-      #   # Parse debris gate parameters from comma-separated string
-      #   debris_gate_params <- unlist(strsplit(input$batchDebrisGate, ",\\s*"))
-      #   
-      #   preprocessing_params$gates <- list(
-      #     debris_gate = if (length(debris_gate_params) >= 2) debris_gate_params[1:2] else NULL,
-      #     live_dead_gate = if (input$batchLiveDeadGate != "None") input$batchLiveDeadGate else NULL
-      #   )
-      # }
+      # Capture every input$ the worker needs BEFORE entering future_promise()
+      # -- Shiny inputs are not readable inside the async worker process.
+      batch_settings <- list(
+        selected_markers = input$batchSelectedMarkers,
+        dim_red_method   = input$batchDimRedMethod,
+        perplexity       = input$batchPerplexity,
+        tsne_max_iter    = input$batch_tsne_max_iter,
+        use_barnes_hut   = isTRUE(input$batch_use_barnes_hut),
+        tsne_theta       = input$batchTsneTheta,
+        n_neighbors      = input$batchNeighbors,
+        pca_components   = input$batchPcaComponents,
+        do_clustering    = isTRUE(input$showBatchClustering),
+        cluster_method   = input$batchClusterMethod,
+        num_clusters     = input$batchNumClusters,
+        dbscan_eps       = input$batchDbscanEps,
+        dbscan_minpts    = input$batchDbscanMinPts,
+        som_xdim         = input$batchSomXdim,
+        som_ydim         = input$batchSomYdim,
+        som_clusters     = input$batchSomClusters,
+        som_rlen         = input$batchSomRlen,
+        pheno_k          = input$batchPhenoK,
+        identify_pops    = isTRUE(input$batchIdentifyPops),
+        high_threshold   = input$batchHighExpressionThreshold,
+        low_threshold    = input$batchLowExpressionThreshold,
+        min_confidence   = input$batchMinConfidenceThreshold / 100,
+        # §2.3 cross-sample normalisation
+        normalize        = isTRUE(input$batchNormalize),
+        reference_id     = input$batchReferenceSample,
+        norm_max_lms     = if (is.null(input$batchNormMaxLms)) 2L else as.integer(input$batchNormMaxLms)
+      )
       
-      # Initialize results list
-      results <- list()
+      showNotification(
+        paste("Running batch analysis on", length(samples), "samples..."),
+        id = "batch_msg", duration = NULL
+      )
       
-      # Define a processing function for one sample
-      processSample <- function(sample) {
-        withProgress(
-          message = paste("Processing", sample$name),
-          value = 0, 
-          {
+      # ==========================================================================
+      # BATCH PROCESSING -- ASYNC (Framework 2.1)
+      #
+      # Batch analysis loads every sample's file, preprocesses it, runs
+      # dimensionality reduction, and optionally clusters it -- easily minutes
+      # of work once there is more than a handful of samples. Running this
+      # synchronously inside withProgress() blocked the R session for the
+      # entire batch and was one of the causes of server disconnections. The
+      # whole loop now runs inside a single future_promise() on a worker
+      # process (plan(multisession) set in global.R).
+      # ==========================================================================
+      future_promise({
+        
+        tryCatch({
+          # Explicit library() calls -- multisession workers do not reliably
+          # inherit the main session's attached packages.
+          library(flowCore); library(data.table); library(Rtsne); library(uwot)
+          library(dbscan);   library(FlowSOM);    library(Rphenograph); library(igraph)
+          library(flowStats)  # §2.3 cross-sample normalisation
+          
+          reduceAndCluster <- function(sample, preprocess_results, settings, normalization_params) {
             # Load the file data
-            file_data <- loadFlowData(sample$path, sample$name)$data
+            # §2.3: file already loaded upstream (three-phase pipeline).
             
             # Process the data using the common parameters
-            incProgress(0.2, detail = "Preprocessing data...")
-            preprocess_results <- preprocessFlowData(file_data, preprocessing_params)
-            
-            # Run dimensionality reduction
-            incProgress(0.4, detail = paste("Running", input$batchDimRedMethod, "..."))
+            # §2.3: preprocess_results supplied as an argument.
             
             # Perform dimensionality reduction
-            if (input$batchDimRedMethod == "t-SNE") {
-              perplexity_value <- min(input$batchPerplexity, max(5, nrow(preprocess_results$scaled_data) / 10))
-              
-              # Ensure the data is a matrix
+            if (settings$dim_red_method == "t-SNE") {
+              perplexity_value <- min(settings$perplexity, max(5, nrow(preprocess_results$scaled_data) / 10))
               data_matrix <- as.matrix(preprocess_results$scaled_data)
-              
-              # Prepare t-SNE parameters
               tsne_params <- list(
-                dims = 2,
+                dims       = 2,
                 perplexity = perplexity_value,
-                max_iter = input$batch_tsne_max_iter,
-                verbose = FALSE
+                max_iter   = settings$tsne_max_iter,
+                verbose    = FALSE,
+                theta      = if (settings$use_barnes_hut) settings$tsne_theta else 0.0
               )
+              dr_result <- do.call(Rtsne::Rtsne, c(list(X = data_matrix), tsne_params))
+              reduced_data <- data.frame(dim1 = dr_result$Y[, 1], dim2 = dr_result$Y[, 2])
               
-              if (input$batch_use_barnes_hut) {
-                # Use Barnes-Hut t-SNE
-                tsne_params$theta <- input$batchTsneTheta
-                incProgress(0.1, detail = "Running Barnes-Hut t-SNE...")
-              } else {
-                # Use exact t-SNE (very slow for large datasets)
-                tsne_params$theta <- 0.0  # This triggers exact t-SNE
-                incProgress(0.1, detail = "Running exact t-SNE (may be slow)...")
-              }
+              # MEMORY OPTIMIZATION: clear t-SNE intermediates immediately
+              rm(dr_result, data_matrix, tsne_params); gc(verbose = FALSE)
               
-              # Run t-SNE with the configured parameters
-              dr_result <- do.call(Rtsne, c(list(X = data_matrix), tsne_params))
+            } else if (settings$dim_red_method == "UMAP") {
+              umap_result <- uwot::umap(preprocess_results$scaled_data, n_neighbors = settings$n_neighbors)
+              reduced_data <- data.frame(dim1 = umap_result[, 1], dim2 = umap_result[, 2])
+              rm(umap_result); gc(verbose = FALSE)
               
-              reduced_data <- data.frame(dim1 = dr_result$Y[,1], dim2 = dr_result$Y[,2])
-              
-              # MEMORY OPTIMIZATION: Clear t-SNE intermediate objects immediately
-              dr_result <- NULL
-              data_matrix <- NULL
-              tsne_params <- NULL
-              gc(verbose = FALSE)
-            } else if (input$batchDimRedMethod == "UMAP") {
-              # Run UMAP
-              umap_result <- umap(preprocess_results$scaled_data, n_neighbors = input$batchNeighbors)
-              reduced_data <- data.frame(dim1 = umap_result[,1], dim2 = umap_result[,2])
-              
-              # MEMORY OPTIMIZATION: Clear UMAP intermediate objects immediately
-              umap_result <- NULL
-              gc(verbose = FALSE)
-            } else if (input$batchDimRedMethod == "PCA") {
-              # Run PCA
-              num_components <- input$batchPcaComponents
+            } else if (settings$dim_red_method == "PCA") {
+              num_components <- settings$pca_components
               pca_result <- prcomp(preprocess_results$scaled_data, center = TRUE, scale. = TRUE)
-              reduced_data <- data.frame(dim1 = pca_result$x[,1], dim2 = pca_result$x[,2])
+              reduced_data <- data.frame(dim1 = pca_result$x[, 1], dim2 = pca_result$x[, 2])
               if (num_components > 2) {
-                for (i in 3:num_components) {
-                  reduced_data[[paste0("PC", i)]] <- pca_result$x[, i]
-                }
+                for (i in 3:num_components) reduced_data[[paste0("PC", i)]] <- pca_result$x[, i]
               }
+              rm(pca_result, num_components); gc(verbose = FALSE)
               
-              # MEMORY OPTIMIZATION: Clear PCA intermediate objects immediately
-              pca_result <- NULL
-              num_components <- NULL
-              gc(verbose = FALSE)
-            } else if (input$batchDimRedMethod == "MDS") {
-              # Run MDS
-              incProgress(0.1, detail = "Running MDS...")
+            } else if (settings$dim_red_method == "MDS") {
               data_matrix <- as.matrix(preprocess_results$scaled_data)
-              
-              # Compute distance matrix and MDS
               dist_matrix <- dist(data_matrix)
-              mds_result <- cmdscale(dist_matrix, k = 2)
+              mds_result  <- cmdscale(dist_matrix, k = 2)
+              reduced_data <- data.frame(dim1 = mds_result[, 1], dim2 = mds_result[, 2])
               
-              # Store MDS results in dim1 and dim2
-              reduced_data <- data.frame(dim1 = mds_result[,1], dim2 = mds_result[,2])
-              
-              # MEMORY OPTIMIZATION: Clear MDS intermediate objects immediately (these are often very large)
-              data_matrix <- NULL
-              dist_matrix <- NULL
-              mds_result <- NULL
-              gc(verbose = FALSE)
+              # MEMORY OPTIMIZATION: distance matrices are O(N^2) -- clear promptly
+              rm(data_matrix, dist_matrix, mds_result); gc(verbose = FALSE)
             }
             
             # Create plot data
             plot_data <- as.data.frame(preprocess_results$sampled_data)
-            colnames(plot_data) <- input$batchSelectedMarkers
-            
-            # Add dimensionality reduction coordinates
+            colnames(plot_data) <- settings$selected_markers
             plot_data$dim1 <- reduced_data$dim1
             plot_data$dim2 <- reduced_data$dim2
             
             # Run clustering if enabled
             cluster_results <- NULL
-            if (input$showBatchClustering) {
-              incProgress(0.6, detail = paste("Clustering with", input$batchClusterMethod, "..."))
-              
-              # Extract marker data for clustering
-              marker_data <- plot_data[, input$batchSelectedMarkers, drop = FALSE]
-              
-              # Prepare clustering parameters based on method
-              method <- input$batchClusterMethod
+            if (settings$do_clustering) {
+              marker_data <- plot_data[, settings$selected_markers, drop = FALSE]
+              method <- settings$cluster_method
               params <- list()
               
               if (method == "K-means") {
-                params$num_clusters <- input$batchNumClusters
-              }
-              else if (method == "DBSCAN") {
-                params$eps <- input$batchDbscanEps
-                params$minPts <- input$batchDbscanMinPts
-              }
-              else if (method == "FlowSOM") {
-                params$xdim <- input$batchSomXdim
-                params$ydim <- input$batchSomYdim
-                params$n_metaclusters <- input$batchSomClusters
-                params$rlen <- input$batchSomRlen
-              }
-              else if (method == "Phenograph") {
-                params$k <- input$batchPhenoK
+                params$num_clusters <- max(2L, min(100L, as.integer(settings$num_clusters)))
+              } else if (method == "DBSCAN") {
+                params$eps    <- max(0.001, min(100, as.numeric(settings$dbscan_eps)))
+                params$minPts <- max(1L, min(1000L, as.integer(settings$dbscan_minpts)))
+              } else if (method == "FlowSOM") {
+                params$xdim           <- max(2L, min(20L, as.integer(settings$som_xdim)))
+                params$ydim           <- max(2L, min(20L, as.integer(settings$som_ydim)))
+                params$n_metaclusters <- max(2L, min(50L, as.integer(settings$som_clusters)))
+                params$rlen           <- max(1L, min(1000L, as.integer(settings$som_rlen)))
+              } else if (method == "Phenograph") {
+                params$k <- max(5L, min(500L, as.integer(settings$pheno_k)))
               }
               
-              # Run the clustering algorithm
               cluster_results <- runClustering(marker_data, method, params)
-              
-              # Add cluster IDs to plot data if clustering was successful
               if (!is.null(cluster_results)) {
                 plot_data$Cluster <- as.factor(cluster_results$cluster_ids)
               }
             }
             
-            # Run population identification if enabled and clustering was successful
+            # Run population identification if enabled and clustering succeeded
             populations <- NULL
-            if (input$batchIdentifyPops && !is.null(cluster_results)) {
-              incProgress(0.8, detail = "Identifying cell populations...")
-              
-              # Get identification parameters
-              high_threshold <- input$batchHighExpressionThreshold
-              low_threshold <- input$batchLowExpressionThreshold
-              min_confidence <- input$batchMinConfidenceThreshold / 100  # Convert from percentage
-              
-              # Run identification
+            if (settings$identify_pops && !is.null(cluster_results)) {
               populations <- identify_cell_populations(
                 cluster_results$centers,
-                input$batchSelectedMarkers,
-                high_threshold = high_threshold,
-                low_threshold = low_threshold,
-                min_confidence = min_confidence
+                settings$selected_markers,
+                high_threshold = settings$high_threshold,
+                low_threshold  = settings$low_threshold,
+                min_confidence = settings$min_confidence
               )
               
-              # Add population to plot data if available
-              if (!is.null(populations) && !is.null(cluster_results)) {
-                # Map cluster IDs to population names
-                population_map <- setNames(
-                  populations$Population,
-                  populations$Cluster
-                )
-                
-                # Add population column to plot data
+              if (!is.null(populations)) {
+                population_map <- setNames(populations$Population, populations$Cluster)
                 plot_data$Population <- population_map[as.character(plot_data$Cluster)]
               }
             }
             
-            # Store final results
+            # MEMORY OPTIMIZATION: final cleanup for this sample
             sample_result <- list(
               id = sample$id,
               name = sample$name,
@@ -1045,101 +1088,147 @@ batchAnalysisModuleServer <- function(id, app_state) {
               plot_data = plot_data,
               cluster_results = cluster_results,
               populations = populations,
-              dim_red_method = input$batchDimRedMethod,
+              dim_red_method = settings$dim_red_method,
+              normalized = isTRUE(settings$normalize),          # §2.3
+              normalization = normalization_params,             # §2.3
               num_cells = nrow(plot_data),
               processed_time = Sys.time()
             )
-            
-            # MEMORY OPTIMIZATION: Final cleanup for this sample before returning
-            file_data <- NULL
-            reduced_data <- NULL
-            marker_data <- NULL
-            population_map <- NULL
-            if (exists("preprocessing_params")) preprocessing_params <- NULL
             gc(verbose = FALSE)
             
-            return(sample_result)
+            sample_result
           }
-        )
-      }
-      
-      # Process each sample
-      withProgress(
-        message = "Running batch analysis",
-        value = 0, 
-        {
+          
+          # ── §2.3 THREE-PHASE PIPELINE ────────────────────────────────────
+          # Phase 1 — preprocess every sample WITHOUT scaling (scaling must run
+          # AFTER cross-sample normalisation). arcsinh still applies inside
+          # preprocessFlowData. Keep only sampled_data + metrics to bound memory
+          # while all samples are held at once for normalisation.
+          preprocessing_params$scale_data <- FALSE
+          preprocessed <- list()
           for (i in seq_along(samples)) {
-            incProgress(amount = 1/length(samples), 
-                        detail = paste("Processing sample", i, "of", length(samples)))
-            
-            sample <- samples[[i]]
-            result <- processSample(sample)
-            results[[sample$id]] <- result
+            s  <- samples[[i]]
+            fd <- loadFlowData(s$path, s$name)$data
+            pr <- preprocessFlowData(fd, preprocessing_params)
+            preprocessed[[s$id]] <- list(
+              sample = s,
+              pr = list(
+                sampled_data    = pr$sampled_data,
+                sampled_indices = pr$sampled_indices,
+                metrics         = pr$metrics
+              )
+            )
+            rm(fd, pr); gc(verbose = FALSE)
+          }
+
+          # Phase 2 — optional cross-sample normalisation to the reference.
+          normalization_params <- NULL
+          if (isTRUE(batch_settings$normalize)) {
+            norm <- applyGaussNorm(
+              sampled_list = lapply(preprocessed, function(x) x$pr$sampled_data),
+              markers      = batch_settings$selected_markers,
+              reference_id = batch_settings$reference_id,
+              max_lms      = batch_settings$norm_max_lms
+            )
+            for (sid in names(preprocessed)) {
+              preprocessed[[sid]]$pr$sampled_data <- norm$normalized[[sid]]
+            }
+            normalization_params <- norm$params
+          }
+
+          # Phase 3 — scale (post-normalisation) then DR + clustering.
+          out <- list()
+          for (sid in names(preprocessed)) {
+            s  <- preprocessed[[sid]]$sample
+            pr <- preprocessed[[sid]]$pr
+            pr$scaled_data <- scale(pr$sampled_data)   # mirrors preprocessFlowData Step 6
+            out[[sid]] <- reduceAndCluster(s, pr, batch_settings, normalization_params)
+            preprocessed[[sid]] <- NULL; gc(verbose = FALSE)
+          }
+          attr(out, "normalization") <- normalization_params
+          out
+          
+        }, error = function(e) {
+          stop(paste("Batch analysis error:", conditionMessage(e)))
+        })
+        
+        # Promise success handler -- back on the main Shiny thread. Only here
+        # is it safe to write to reactiveVal() / update the UI.
+      }) %...>% (function(results) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
+        
+        batchResults(results)
+        batchNormParams(attr(results, "normalization"))   # §2.3
+        removeNotification("batch_msg")
+        
+        # Update sample selection dropdown for visualization
+        updateSelectInput(session, "viewSample",
+                          choices = setNames(
+                            names(results),
+                            sapply(results, function(r) r$name)
+                          ))
+        
+        # Update comparison dropdowns
+        control_ids <- c()
+        treated_ids <- c()
+        control_names <- c()
+        treated_names <- c()
+        
+        for (id in names(results)) {
+          sample <- results[[id]]
+          if (sample$group == "Control") {
+            control_ids <- c(control_ids, id)
+            control_names <- c(control_names, sample$name)
+          } else if (sample$group == "Treated") {
+            treated_ids <- c(treated_ids, id)
+            treated_names <- c(treated_names, sample$name)
           }
         }
-      )
-      
-      # Update results
-      batchResults(results)
-      
-      # Update sample selection dropdown for visualization
-      updateSelectInput(session, "viewSample", 
-                        choices = setNames(
-                          names(results),
-                          sapply(results, function(r) r$name)
-                        ))
-      
-      # Update comparison dropdowns
-      control_ids <- c()
-      treated_ids <- c()
-      control_names <- c()
-      treated_names <- c()
-      
-      # Loop through results to find control and treated samples
-      for (id in names(results)) {
-        sample <- results[[id]]
-        if (sample$group == "Control") {
-          control_ids <- c(control_ids, id)
-          control_names <- c(control_names, sample$name)
-        } else if (sample$group == "Treated") {
-          treated_ids <- c(treated_ids, id)
-          treated_names <- c(treated_names, sample$name)
+        
+        if (length(control_ids) > 0) {
+          updateSelectInput(session, "compareViewControl",
+                            choices = setNames(control_ids, control_names))
+          updateSelectInput(session, "clusterCompareControl",
+                            choices = setNames(control_ids, control_names))
         }
-      }
-      
-      if (length(control_ids) > 0) {
-        updateSelectInput(session, "compareViewControl", 
-                          choices = setNames(control_ids, control_names))
-      }
-      
-      if (length(treated_ids) > 0) {
-        updateSelectInput(session, "compareViewTreated",
-                          choices = setNames(treated_ids, treated_names))
-      }
-      
-      # Update marker comparison dropdown
-      if (length(results) > 0) {
-        # Get marker selection
-        updateSelectInput(session, "sampleMarkerSelect", 
-                          choices = input$batchSelectedMarkers,
-                          selected = input$batchSelectedMarkers[1])
-      }
-      
-      # Update cluster comparison dropdowns
-      if (length(control_ids) > 0) {
-        updateSelectInput(session, "clusterCompareControl", 
-                          choices = setNames(control_ids, control_names))
-      }
-      
-      if (length(treated_ids) > 0) {
-        updateSelectInput(session, "clusterCompareTreated",
-                          choices = setNames(treated_ids, treated_names))
-      }
-      
-      # Show batch analysis completion notification
-      showNotification(paste("Batch analysis complete for", length(samples), "samples"), 
-                       type = "message", 
-                       duration = 5)
+        
+        if (length(treated_ids) > 0) {
+          updateSelectInput(session, "compareViewTreated",
+                            choices = setNames(treated_ids, treated_names))
+          updateSelectInput(session, "clusterCompareTreated",
+                            choices = setNames(treated_ids, treated_names))
+        }
+        
+        # Update marker comparison dropdown
+        if (length(results) > 0) {
+          updateSelectInput(session, "sampleMarkerSelect",
+                            choices = input$batchSelectedMarkers,
+                            selected = input$batchSelectedMarkers[1])
+        }
+        
+        # Show batch analysis completion notification
+        showNotification(paste("Batch analysis complete for", length(results), "samples"),
+                         type = "message",
+                         duration = 5)
+        
+        # Promise error handler -- catches any error thrown inside
+        # future_promise() so the user gets visible feedback instead of a
+        # spinner that never resolves.
+      }) %...!% (function(err) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+
+          return(invisible(NULL))
+        }
+        removeNotification("batch_msg")
+        showNotification(
+          paste("Batch analysis failed:", conditionMessage(err)),
+          type = "error", duration = 8
+        )
+      })
     })
     
     # Single sample view title

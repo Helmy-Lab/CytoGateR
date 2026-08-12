@@ -25,6 +25,18 @@ clusteringModuleUI <- function(id) {
 clusteringModuleServer <- function(id, input_data, app_state) {
   moduleServer(id, function(input, output, session) {
     
+    # Session cleanup handler (Framework 2.1): flags the session as closed so
+    # any future_promise() result that resolves after disconnect is discarded
+    # instead of writing to dead reactives, and logs the disconnect reason.
+    session_closed <- FALSE
+    session$onSessionEnded(function() {
+      session_closed <<- TRUE
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+    })
+    
     # Reactive values to store results
     clustering_results <- reactiveVal(NULL)
     populations <- reactiveVal(NULL)
@@ -150,7 +162,20 @@ clusteringModuleServer <- function(id, input_data, app_state) {
     # END OF SERVER-SIDE CONDITIONAL UI RENDERING
     # ============================================================================
     
-    # Run clustering when button is clicked
+    # ============================================================================
+    # RUN CLUSTERING -- ASYNC (Framework 2.1)
+    #
+    # DBSCAN/FlowSOM/Phenograph on more than a few thousand events routinely
+    # run for tens of seconds to minutes. Running that synchronously inside
+    # withProgress() blocked the main R session and was one of the causes of
+    # server disconnections. Heavy work now runs inside future_promise() on a
+    # worker process (plan(multisession) set in global.R), keeping the main
+    # session responsive.
+    #
+    # IMPORTANT: all input$* values are captured as local variables BEFORE
+    # entering future_promise() -- Shiny inputs are not readable inside the
+    # async worker.
+    # ============================================================================
     observeEvent(input$runClustering, {
       req(input_data(), input$showClusteringOptions)
       
@@ -158,106 +183,121 @@ clusteringModuleServer <- function(id, input_data, app_state) {
       data <- input_data()
       req(data$scaled_data, data$markers)
       
-      # Extract marker data for clustering
-      marker_data <- data$scaled_data
-      marker_names <- data$markers
+      # Pre-computation guard: warn before launching expensive algorithms on
+      # large datasets. Does not block -- user can still proceed.
+      n_events <- nrow(data$scaled_data)
+      if (n_events > 50000) {
+        showNotification(
+          paste0("Large dataset: ", format(n_events, big.mark = ","),
+                 " events detected. Clustering may take several minutes."),
+          type = "warning", duration = 8
+        )
+      }
       
-      # Create progress notification
-      withProgress(message = 'Clustering cells...', value = 0, {
+      # Capture everything the worker needs before leaving the reactive context
+      marker_data  <- data$scaled_data
+      marker_names <- data$markers
+      method       <- input$clusterMethod
+      
+      # Prepare clustering parameters based on selected method
+      params <- list()
+      if (method == "K-means") {
+        params$num_clusters <- max(2L, min(100L, as.integer(input$numClusters)))
+      } else if (method == "DBSCAN") {
+        params$eps    <- max(0.001, min(100, as.numeric(input$dbscanEps)))
+        params$minPts <- max(1L, min(1000L, as.integer(input$dbscanMinPts)))
+      } else if (method == "FlowSOM") {
+        params$xdim           <- max(2L, min(20L, as.integer(input$som_xdim)))
+        params$ydim           <- max(2L, min(20L, as.integer(input$som_ydim)))
+        params$n_metaclusters <- max(2L, min(50L, as.integer(input$som_clusters)))
+        params$rlen           <- max(1L, min(1000L, as.integer(input$som_rlen)))
+      } else if (method == "Phenograph") {
+        params$k <- max(5L, min(500L, as.integer(input$phenoK)))
+      }
+      
+      identify_pops  <- isTRUE(input$identifyPopulations)
+      high_threshold <- input$highExpressionThreshold
+      low_threshold  <- input$lowExpressionThreshold
+      min_confidence <- input$minConfidenceThreshold / 100  # Convert from percentage
+      
+      showNotification(paste("Running", method, "clustering..."), id = "cluster_msg", duration = NULL)
+      
+      # Runs in a separate R process. All objects referenced inside must be
+      # self-contained -- no reactive reads, no writes to reactiveVal().
+      future_promise({
         
-        # Prepare clustering parameters based on selected method
-        method <- input$clusterMethod
-        params <- list()
-        
-        if (method == "K-means") {
-          params$num_clusters <- input$numClusters
-        }
-        else if (method == "DBSCAN") {
-          params$eps <- input$dbscanEps
-          params$minPts <- input$dbscanMinPts
-        }
-        else if (method == "FlowSOM") {
-          params$xdim <- input$som_xdim
-          params$ydim <- input$som_ydim
-          params$n_metaclusters <- input$som_clusters
-          params$rlen <- input$som_rlen
-        }
-        else if (method == "Phenograph") {
-          params$k <- input$phenoK
-        }
-        
-        # Run clustering
-        incProgress(0.3, detail = paste("Running", method, "clustering..."))
-        cluster_result <- runClustering(marker_data, method, params)
-        
-        # MEMORY OPTIMIZATION: Clear clustering parameters and intermediate data
-        params <- NULL
-        marker_data <- NULL
-        gc(verbose = FALSE)
-        
-        # Store clustering results
-        if (!is.null(cluster_result)) {
-          clustering_results(cluster_result)
+        tryCatch({
+          # Explicit library() calls: multisession workers do not reliably
+          # inherit the main session's attached packages, and runClustering()
+          # calls Rphenograph()/membership() unqualified (no pkg:: prefix).
+          library(dbscan)
+          library(FlowSOM)
+          library(Rphenograph)
+          library(igraph)
+          library(flowCore)
           
-          # Run population identification if enabled
-          if (input$identifyPopulations) {
-            incProgress(0.7, detail = "Identifying cell populations...")
-            
-            # Get identification parameters
-            high_threshold <- input$highExpressionThreshold
-            low_threshold <- input$lowExpressionThreshold
-            min_confidence <- input$minConfidenceThreshold / 100  # Convert from percentage
-            
-            # Run identification
+          cluster_result <- runClustering(marker_data, method, params)
+          
+          if (is.null(cluster_result)) {
+            stop(paste0(method, " clustering failed. Try different parameters or another method."))
+          }
+          
+          pop_result <- NULL
+          if (identify_pops) {
             pop_result <- identify_cell_populations(
               cluster_result$centers,
               marker_names,
               high_threshold = high_threshold,
-              low_threshold = low_threshold,
+              low_threshold  = low_threshold,
               min_confidence = min_confidence
-            )
-            
-            # Store population results
-            populations(pop_result)
-            
-            # MEMORY OPTIMIZATION: Clear population identification intermediate data
-            pop_result <- NULL
-            high_threshold <- NULL
-            low_threshold <- NULL
-            min_confidence <- NULL
-            gc(verbose = FALSE)
-            
-            # Show success notification
-            showNotification(
-              paste("Cell clustering complete with", method, "and populations identified"),
-              type = "message",
-              duration = 4
-            )
-          } else {
-            # Clear population results if not identifying
-            populations(NULL)
-            
-            # Show success notification
-            showNotification(
-              paste("Cell clustering complete with", method),
-              type = "message",
-              duration = 4
             )
           }
           
-          # MEMORY OPTIMIZATION: Final cleanup after clustering is complete
-          cluster_result <- NULL
-          marker_names <- NULL
-          method <- NULL
-          gc(verbose = FALSE)
-        } else {
-          # Show error notification if clustering failed
+          list(cluster_result = cluster_result, pop_result = pop_result, method = method)
+          
+        }, error = function(e) {
+          stop(paste("Clustering error:", conditionMessage(e)))
+        })
+        
+        # Promise success handler -- back on the main Shiny thread. Only here
+        # is it safe to write to reactiveVal() / update the UI.
+      }) %...>% (function(out) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
+        
+        clustering_results(out$cluster_result)
+        populations(out$pop_result)
+        removeNotification("cluster_msg")
+        
+        if (!is.null(out$pop_result)) {
           showNotification(
-            paste("Clustering failed. Try different parameters or another method."),
-            type = "error",
-            duration = 5
+            paste("Cell clustering complete with", out$method, "and populations identified"),
+            type = "message", duration = 4
+          )
+        } else {
+          showNotification(
+            paste("Cell clustering complete with", out$method),
+            type = "message", duration = 4
           )
         }
+        
+        # Promise error handler -- catches any error thrown inside
+        # future_promise() so the user gets visible feedback instead of a
+        # spinner that never resolves.
+      }) %...!% (function(err) {
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+
+
+          return(invisible(NULL))
+        }
+        removeNotification("cluster_msg")
+        showNotification(
+          paste("Clustering failed:", conditionMessage(err)),
+          type = "error", duration = 6
+        )
       })
     })
     

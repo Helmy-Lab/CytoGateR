@@ -137,77 +137,10 @@ loadFlowData <- function(file_path, file_name) {
 }
 
 # Quality control function
-performQC <- function(flow_data, qc_settings = list()) {
-  # Default settings
-  default_settings <- list(
-    remove_margins = TRUE,
-    min_cells = 100,
-    max_anomalies = 0.1
-  )
-  
-  # Merge with user-provided settings
-  settings <- modifyList(default_settings, qc_settings)
-  
-  # Apply QC only for FCS files
-  if (inherits(flow_data, "flowFrame")) {
-    # Get initial cell count
-    initial_count <- nrow(flow_data)
-    
-    # Apply flowAI QC
-    tryCatch({
-      qc_result <- flow_auto_qc(
-        flow_data,
-        alpha = 0.01
-      )
-      
-      # Check if enough cells remain
-      if (nrow(qc_result) < settings$min_cells) {
-        warning("QC removed too many cells. Using original data.")
-        qc_result <- flow_data
-      }
-      
-      # Calculate percent removed
-      removed_pct <- 1 - (nrow(qc_result) / initial_count)
-      
-      # If too many anomalies were found, use original data
-      if (removed_pct > settings$max_anomalies) {
-        warning(sprintf("QC found too many anomalies (%.1f%%). Using original data.", removed_pct * 100))
-        qc_result <- flow_data
-      }
-      
-      return(list(
-        data = qc_result,
-        metrics = list(
-          initial_count = initial_count,
-          final_count = nrow(qc_result),
-          removed_pct = removed_pct
-        )
-      ))
-    }, error = function(e) {
-      warning("QC process failed: ", e$message, ". Using original data.")
-      return(list(
-        data = flow_data,
-        metrics = list(
-          initial_count = initial_count,
-          final_count = initial_count,
-          removed_pct = 0,
-          error = e$message
-        )
-      ))
-    })
-  } else {
-    # For non-FCS data, return as is
-    return(list(
-      data = flow_data, 
-      metrics = list(
-        initial_count = nrow(flow_data),
-        final_count = nrow(flow_data),
-        removed_pct = 0,
-        message = "QC not applicable for non-FCS files"
-      )
-    ))
-  }
-}
+# MOVED: performQC() now lives in R/utils/qc_utils.R.
+# It was relocated as part of Framework §2.2 so that QC status, per-sample
+# metrics and the flowAI anomaly report share one contract, and so that the
+# silent fallbacks required by §6.4 could be removed in one place.
 
 # Gating function to remove debris and dead cells
 performGating <- function(flow_data, gates = list()) {
@@ -409,8 +342,18 @@ preprocessFlowData <- function(input_data, preprocessing_params = list()) {
   # Step 2: Quality Control
   if (params$perform_qc) {
     qc_result <- performQC(current_data, params$qc_settings)
-    results$qc_data <- qc_result$data
-    results$metrics$qc <- qc_result$metrics
+
+    # §6.4 No Silent Fallbacks — if QC could not be applied, stop the pipeline.
+    # Previously performQC() reverted to unfiltered data with a console warning,
+    # so the user saw results that looked QC'd but were not. Throwing here
+    # propagates to the promise rejection handler and shows a UI error.
+    if (identical(qc_result$status, QC_STATUS$ERROR) || is.null(qc_result$data)) {
+      stop(qc_result$error %||% "Quality control failed for this sample.")
+    }
+
+    results$qc_data       <- qc_result$data
+    results$metrics$qc    <- qc_result$metrics
+    results$metrics$qc$status <- qc_result$status
     
     # MEMORY OPTIMIZATION: Clear intermediate QC objects
     qc_result <- NULL

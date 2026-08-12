@@ -2,6 +2,9 @@
 # Loads libraries and common functions
 
 # Load required libraries
+library(future)
+library(promises)
+plan(multisession, workers = 2)
 library(shiny)
 library(shinydashboard)  # For dashboard components
 library(shinyjs)  # For JavaScript functionality
@@ -41,7 +44,9 @@ library(ggpointdensity)  # For point density coloring
 library(scattermore)
 
 # Set global options
-options(shiny.maxRequestSize = 250*1024^2)
+# Framework 2.1: raised from 250MB to 500MB. The 'Tested limits' statement in
+# the Data Upload panel must be kept consistent with this value.
+options(shiny.maxRequestSize = 500*1024^2)
 
 # Source utility functions
 files_to_source <- list.files("R/utils", pattern = "\\.R$", full.names = TRUE)

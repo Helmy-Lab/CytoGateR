@@ -94,6 +94,15 @@ compensationModuleUI <- function(id) {
                 icon("check-circle"), 
                 strong(" Supported formats: "), 
                 "Standard (FL1-A, FL2-H), FJComp (FJComp-A, FJComp-H), and other naming conventions"),
+
+            # §2.4 [S2]/[S4]: spectral-file warning (rendered when a spectral file is uploaded)
+            uiOutput(ns("spectral_warning")),
+
+            div(class = "alert alert-light", style = "margin-top: 8px; font-size: 12px;",
+                icon("circle-exclamation"),
+                strong(" Scope: "),
+                "This module performs conventional spillover compensation only. ",
+                "Spectral flow data must be unmixed upstream (instrument software or CATALYST) before import."),
                             
                             # File validation status
                             shinycssloaders::withSpinner(
@@ -778,6 +787,19 @@ compensationModuleServer <- function(id, app_state) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
+    # Session cleanup handler (Framework 2.1): logs disconnect reason so
+    # support staff can distinguish a normal browser close from an
+    # unexpected drop while a QC/compensation job was running.
+    session_closed <- FALSE
+    session$onSessionEnded(function() {
+      session_closed <<- TRUE
+      logSessionEnded(id, sessionEndReason(session))
+
+
+
+
+    })
+    
     # Reactive values for module state
     values <- reactiveValues(
       # File management
@@ -895,6 +917,21 @@ compensationModuleServer <- function(id, app_state) {
       }
     })
     
+    # §2.4 [S1]/[S2]: flag spectral files on upload (metadata-only read per file).
+    output$spectral_warning <- renderUI({
+      req(input$fcs_files)
+      flags <- lapply(input$fcs_files$datapath, detectSpectralFile)
+      spectral_idx <- which(vapply(flags, function(f) isTRUE(f$is_spectral), logical(1)))
+      if (length(spectral_idx) == 0) return(NULL)
+      spectral_names <- input$fcs_files$name[spectral_idx]
+      div(class = "alert alert-warning", style = "margin-top: 10px;",
+          icon("triangle-exclamation"),
+          strong(" Spectral file detected. "),
+          SPECTRAL_WARNING_TEXT,
+          tags$ul(lapply(spectral_names, function(n) tags$li(n)))
+      )
+    })
+
     # Render file validation output - ENHANCED VERSION
     output$file_validation <- renderText({
       req(input$fcs_files)
@@ -1381,15 +1418,22 @@ compensationModuleServer <- function(id, app_state) {
     observeEvent(input$compute_matrix, {
       req(values$validated_assignment)
       
-      withProgress(message = "Computing spillover matrix...", value = 0, {
-        
+      # Framework 2.1: spillover matrix computation involves multiple
+      # read.FCS() calls plus flowStats::spillover() -- previously ran
+      # synchronously inside withProgress(), which can exceed Shiny's ~90s
+      # disconnect timeout on multi-file uploads. Now runs inside
+
+      # future_promise() on a worker process.
+
+      fcs_names_capture        <- input$fcs_files$name
+      fcs_datapaths_capture    <- input$fcs_files$datapath
+      file_assignments_capture <- values$file_assignments
+      
+      showNotification("Computing spillover matrix...", id = "spillover_msg", duration = NULL)
+      
+      future_promise({
         tryCatch({
-          incProgress(0.2, detail = "Reading control files...")
-          
-          # Get only channels that have assigned control files
-          assigned_channels <- setdiff(names(values$file_assignments), "unstained")
-          
-          # Remove any NA values that might cause logical errors
+          assigned_channels <- setdiff(names(file_assignments_capture), "unstained")
           assigned_channels <- assigned_channels[!is.na(assigned_channels)]
           assigned_channels <- assigned_channels[assigned_channels != ""]
           
@@ -1397,28 +1441,23 @@ compensationModuleServer <- function(id, app_state) {
             stop("At least 2 fluorescent channels with assigned controls are required")
           }
           
-          # Read unstained control first to get available channels
-          unstained_file <- values$file_assignments$unstained
+          unstained_file <- file_assignments_capture$unstained
           if (is.null(unstained_file) || is.na(unstained_file) || unstained_file == "") {
             stop("No unstained control file assigned")
           }
           
-          unstained_idx <- which(input$fcs_files$name == unstained_file)
+          unstained_idx <- which(fcs_names_capture == unstained_file)
           if (length(unstained_idx) == 0) {
             stop(paste("Unstained control file not found:", unstained_file))
           }
           
-          unstained_ff <- read.FCS(input$fcs_files$datapath[unstained_idx], transformation = FALSE)
+          unstained_ff <- read.FCS(fcs_datapaths_capture[unstained_idx], transformation = FALSE)
           available_channels <- colnames(unstained_ff)
-          
-          # Remove any NA values from available channels
           available_channels <- available_channels[!is.na(available_channels)]
           
-          # Filter assigned channels to only those actually present in the data
           valid_channels <- intersect(assigned_channels, available_channels)
           
           if (length(valid_channels) < 2) {
-            # Try enhanced detection to provide better error message
             enhanced_channels <- detectFluorescenceChannels(available_channels)
             stop(paste("Only", length(valid_channels), "assigned channels found in data.",
                       "Available channels:", paste(available_channels, collapse = ", "),
@@ -1426,56 +1465,29 @@ compensationModuleServer <- function(id, app_state) {
                       paste(enhanced_channels, collapse = ", ")))
           }
           
-          incProgress(0.4, detail = "Reading single-stain controls...")
-          
-          # Read control files only for valid channels
           control_flowframes <- list()
           
           for (channel in valid_channels) {
-            # Skip if channel is NA or empty
-            if (is.na(channel) || channel == "") {
-              warning("Skipping invalid channel (NA or empty)")
-              next
-            }
+            if (is.na(channel) || channel == "") next
             
-            control_file <- values$file_assignments[[channel]]
-            if (is.null(control_file) || is.na(control_file) || control_file == "") {
-              warning(paste("No control file assigned for channel", channel, "- skipping"))
-              next
-            }
+            control_file <- file_assignments_capture[[channel]]
+            if (is.null(control_file) || is.na(control_file) || control_file == "") next
             
-            control_idx <- which(input$fcs_files$name == control_file)
-            if (length(control_idx) == 0) {
-              warning(paste("Control file", control_file, "not found for channel", channel, "- skipping"))
-              next
-            }
+            control_idx <- which(fcs_names_capture == control_file)
+            if (length(control_idx) == 0) next
             
-            control_ff <- read.FCS(input$fcs_files$datapath[control_idx], transformation = FALSE)
+            control_ff <- read.FCS(fcs_datapaths_capture[control_idx], transformation = FALSE)
             
-            # Verify the channel exists in the control file
             control_channels <- colnames(control_ff)
-            if (is.null(control_channels) || !any(!is.na(control_channels))) {
-              warning(paste("No valid channels found in control file", control_file, "- skipping"))
-              next
-            }
-            
-            if (!(channel %in% control_channels)) {
-              warning(paste("Channel", channel, "not found in control file", control_file, "- skipping"))
-              next
-            }
+            if (is.null(control_channels) || !any(!is.na(control_channels))) next
+            if (!(channel %in% control_channels)) next
             
             control_flowframes[[channel]] <- control_ff
           }
           
-          # Add unstained control
           control_flowframes[["unstained"]] <- unstained_ff
           
-          incProgress(0.6, detail = "Filtering channels and creating flowSet...")
-          
-          # Update valid channels list based on successful file reads
           final_channels <- setdiff(names(control_flowframes), "unstained")
-          
-          # Remove any NA values from final channels
           final_channels <- final_channels[!is.na(final_channels)]
           final_channels <- final_channels[final_channels != ""]
           
@@ -1483,106 +1495,77 @@ compensationModuleServer <- function(id, app_state) {
             stop(paste("Only", length(final_channels), "valid control files loaded. Need at least 2."))
           }
           
-          # Keep scatter parameters and final channels only
           scatter_params <- available_channels[grepl("FSC|SSC|Time", available_channels, ignore.case = TRUE)]
           keep_params <- c(scatter_params, final_channels)
-          
-          # Remove any NA values from keep_params
           keep_params <- keep_params[!is.na(keep_params)]
           keep_params <- keep_params[keep_params != ""]
           
-          # Filter all flowFrames to same parameter set
           filtered_frames <- list()
-          for (name in names(control_flowframes)) {
-            if (is.na(name) || name == "") {
-              warning("Skipping invalid flowFrame name")
-              next
-            }
-            
-            ff <- control_flowframes[[name]]
-            if (is.null(ff)) {
-              warning(paste("Skipping null flowFrame for", name))
-              next
-            }
-            
+          for (nm in names(control_flowframes)) {
+            if (is.na(nm) || nm == "") next
+            ff <- control_flowframes[[nm]]
+            if (is.null(ff)) next
             ff_channels <- colnames(ff)
-            if (is.null(ff_channels) || !any(!is.na(ff_channels))) {
-              warning(paste("Skipping flowFrame with no valid channels for", name))
-              next
-            }
-            
+            if (is.null(ff_channels) || !any(!is.na(ff_channels))) next
             common_params <- intersect(keep_params, ff_channels)
             common_params <- common_params[!is.na(common_params)]
-            
-            if (length(common_params) >= length(final_channels)) {  # Must have all fluorescent channels
-              filtered_frames[[name]] <- ff[, common_params]
-            } else {
-              warning(paste("Skipping", name, "- missing required channels"))
+            if (length(common_params) >= length(final_channels)) {
+              filtered_frames[[nm]] <- ff[, common_params]
             }
           }
           
-          if (length(filtered_frames) < 3) {  # unstained + at least 2 stains
+          if (length(filtered_frames) < 3) {
             stop("Not enough valid control files after filtering")
           }
           
-          # Create flowSet
           control_set <- flowSet(filtered_frames)
           
-          incProgress(0.8, detail = "Computing spillover matrix...")
-          
-          # Create pattern to match only final channels
-          # Ensure final_channels are safe for regex
           safe_channels <- final_channels[!is.na(final_channels)]
           safe_channels <- safe_channels[safe_channels != ""]
-          
           if (length(safe_channels) == 0) {
             stop("No valid channels remaining for pattern matching")
           }
           
-          # Escape special regex characters in channel names
           escaped_channels <- gsub("([\\[\\]\\(\\)\\{\\}\\+\\*\\?\\^\\$\\|\\.])", "\\\\\\1", safe_channels)
           channel_pattern <- paste0("^(", paste(escaped_channels, collapse = "|"), ")$")
           
-          # Compute spillover matrix
-          spillover_matrix <- spillover(control_set, 
+          spillover_matrix <- spillover(control_set,
                                         unstained = "unstained",
                                         patt = channel_pattern,
                                         method = "median")
           
-          incProgress(1.0, detail = "Finalizing...")
-          
-          # Store results
-          values$original_matrix <- spillover_matrix
-          values$current_matrix <- spillover_matrix
-          values$matrix_source <- "computed"
-          values$workflow_step <- 4
-          
-          # FIXED: Trigger initial matrix display
-          matrix_render_trigger(matrix_render_trigger() + 1)
-          
-          success_msg <- paste0("✓ Spillover matrix computed successfully!\n",
-                               "✓ Channels included: ", paste(safe_channels, collapse = ", "), "\n",
-                               "✓ Matrix dimensions: ", nrow(spillover_matrix), "×", ncol(spillover_matrix))
-          
-          showNotification(success_msg, type = "message", duration = 6)
+          list(spillover_matrix = spillover_matrix, safe_channels = safe_channels)
           
         }, error = function(e) {
-          error_msg <- paste("Error computing spillover matrix:", e$message)
-          showNotification(error_msg, type = "error", duration = 10)
-          
-          # Additional debugging information for troubleshooting
-          cat("Debug info:\n")
-          if (exists("assigned_channels") && !is.null(assigned_channels)) {
-            cat("Assigned channels:", paste(assigned_channels[!is.na(assigned_channels)], collapse = ", "), "\n")
-          }
-          if (exists("valid_channels") && !is.null(valid_channels)) {
-            cat("Valid channels:", paste(valid_channels[!is.na(valid_channels)], collapse = ", "), "\n")
-          }
-          if (exists("safe_channels") && !is.null(safe_channels)) {
-            cat("Safe channels:", paste(safe_channels, collapse = ", "), "\n")
-          }
+          stop(paste("Error computing spillover matrix:", conditionMessage(e)))
         })
+      }) %...>% (function(result) {
+        removeNotification("spillover_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
+        
+        values$original_matrix <- result$spillover_matrix
+        values$current_matrix  <- result$spillover_matrix
+        values$matrix_source   <- "computed"
+        values$workflow_step   <- 4
+        
+        matrix_render_trigger(matrix_render_trigger() + 1)
+        
+        success_msg <- paste0("Spillover matrix computed successfully!\n",
+                             "Channels included: ", paste(result$safe_channels, collapse = ", "), "\n",
+                             "Matrix dimensions: ", nrow(result$spillover_matrix), "x", ncol(result$spillover_matrix))
+        showNotification(success_msg, type = "message", duration = 6)
+      }) %...!% (function(err) {
+        removeNotification("spillover_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+          return(invisible(NULL))
+        }
+        showNotification(paste("Error computing spillover matrix:", conditionMessage(err)), type = "error", duration = 10)
       })
+      
     })
     
     # Handle pre-computed spillover matrix upload
@@ -2019,32 +2002,52 @@ compensationModuleServer <- function(id, app_state) {
     observeEvent(input$run_qc, {
       req(values$current_matrix, input$qc_channels)
       
-      withProgress(message = "Running QC analysis...", value = 0, {
-        
+      # Framework 2.1: performCompensationQC() reads/compensates control
+      # files and can take multiple seconds -- previously ran synchronously
+      # inside withProgress(). Now runs inside future_promise().
+
+
+
+      qc_file_assignments <- values$file_assignments
+      qc_file_paths       <- input$fcs_files$datapath
+      qc_file_names       <- input$fcs_files$name
+      qc_spillover_matrix <- values$current_matrix
+      qc_channels_capture <- input$qc_channels
+      qc_sample_size      <- input$sample_size
+      
+      showNotification("Running QC analysis...", id = "qc_msg", duration = NULL)
+      
+      future_promise({
         tryCatch({
-          incProgress(0.3, detail = "Applying compensation...")
-          
-          # Apply compensation to control files
-          qc_results <- performCompensationQC(
-            file_assignments = values$file_assignments,
-            file_paths = input$fcs_files$datapath,
-            file_names = input$fcs_files$name,
-            spillover_matrix = values$current_matrix,
-            channels = input$qc_channels,
-            sample_size = input$sample_size
+          performCompensationQC(
+            file_assignments = qc_file_assignments,
+            file_paths       = qc_file_paths,
+            file_names       = qc_file_names,
+            spillover_matrix = qc_spillover_matrix,
+            channels         = qc_channels_capture,
+            sample_size      = qc_sample_size
           )
-          
-          incProgress(1.0, detail = "Finalizing QC results...")
-          
-          values$qc_results <- qc_results
-          values$workflow_step <- 5
-          
-          showNotification("QC analysis completed!", type = "message")
-          
         }, error = function(e) {
-          showNotification(paste("QC analysis failed:", e$message), type = "error")
+          stop(paste("QC analysis failed:", conditionMessage(e)))
         })
+      }) %...>% (function(qc_results) {
+        removeNotification("qc_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
+        values$qc_results <- qc_results
+        values$workflow_step <- 5
+        showNotification("QC analysis completed!", type = "message")
+      }) %...!% (function(err) {
+        removeNotification("qc_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+          return(invisible(NULL))
+        }
+        showNotification(paste("QC analysis failed:", conditionMessage(err)), type = "error")
       })
+      
     })
     
     # QC Metrics Table
@@ -2080,138 +2083,67 @@ compensationModuleServer <- function(id, app_state) {
     
 
     
-    # Apply compensation to experimental files only - triggered when matrix is available
+    
+# Apply compensation to experimental files only - triggered when matrix is available
     observeEvent(values$current_matrix, {
-      # This observer runs after matrix computation/upload to generate compensated files
+      # This observer runs after matrix computation/upload to generate
+      # compensated files.
       req(values$current_matrix, values$uploaded_files, values$experimental_files)
       
-      # Only run if we don't already have compensated files
       if (!is.null(values$compensated_flowset)) {
         return()
       }
       
-      tryCatch({
-        # Apply compensation only to experimental files
-        withProgress(message = "Generating compensated experimental files...", value = 0, {
-          compensated_files <- list()
-          comp_obj <- compensation(values$current_matrix)
-          
-          # Filter to only experimental files
-          experimental_file_indices <- which(values$uploaded_files$name %in% values$experimental_files)
-          
-          if (length(experimental_file_indices) == 0) {
-            showNotification("No experimental files selected for compensation", type = "warning")
-            return()
-          }
-          
-          # Track compatibility issues for detailed reporting
-          compatibility_issues <- list()
-          
-          for (i in experimental_file_indices) {
-            incProgress(1/length(experimental_file_indices), 
-                        detail = paste("Processing experimental file:", values$uploaded_files$name[i]))
-            
-            # Read the FCS file
-            ff <- read.FCS(values$uploaded_files$datapath[i], transformation = FALSE)
-            
-            # Enhanced channel compatibility checking with normalization
-            file_channels <- colnames(ff)
-            matrix_channels <- colnames(values$current_matrix)
-            
-            # Use enhanced channel matching
-            channel_matches <- findChannelMatches(matrix_channels, file_channels)
-            
-            # Count successful matches
-            successful_matches <- sum(sapply(channel_matches, function(m) m$found))
-            high_confidence_matches <- sum(sapply(channel_matches, function(m) m$found && m$confidence >= 0.9))
-            
-            # Decide whether to proceed with compensation
-            compensation_threshold <- 0.8  # Require 80% of channels to match
-            
-            if (successful_matches >= length(matrix_channels) * compensation_threshold) {
-              tryCatch({
-                # Create channel mapping for compensation
-                channel_mapping <- character()
-                for (matrix_ch in names(channel_matches)) {
-                  match_info <- channel_matches[[matrix_ch]]
-                  if (match_info$found) {
-                    channel_mapping[matrix_ch] <- match_info$file_channel
-                  }
-                }
-                
-                # Apply compensation with channel mapping if needed
-                if (all(matrix_channels %in% file_channels)) {
-                  # Direct compensation - no mapping needed
-                  ff_comp <- compensate(ff, comp_obj)
-                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
-                  message("✓ Successfully compensated (exact): ", values$uploaded_files$name[i])
-                } else if (length(channel_mapping) >= length(matrix_channels) * compensation_threshold) {
-                  # Compensation with channel mapping
-                  # Create a new compensation object with mapped channel names
-                  mapped_matrix <- values$current_matrix
-                  
-                  # Rename columns in spillover matrix to match file channels
-                  for (matrix_ch in names(channel_mapping)) {
-                    file_ch <- channel_mapping[matrix_ch]
-                    if (matrix_ch %in% colnames(mapped_matrix)) {
-                      colnames(mapped_matrix)[colnames(mapped_matrix) == matrix_ch] <- file_ch
-                    }
-                    if (matrix_ch %in% rownames(mapped_matrix)) {
-                      rownames(mapped_matrix)[rownames(mapped_matrix) == matrix_ch] <- file_ch
-                    }
-                  }
-                  
-                  # Apply compensation with mapped matrix
-                  mapped_comp_obj <- compensation(mapped_matrix)
-                  ff_comp <- compensate(ff, mapped_comp_obj)
-                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
-                  
-                  match_quality <- paste0(high_confidence_matches, "/", length(matrix_channels), " high confidence")
-                  message("✓ Successfully compensated (mapped): ", values$uploaded_files$name[i], 
-                         " - ", match_quality)
-                } else {
-                  stop("Insufficient channel matches for compensation")
-                }
-              }, error = function(e) {
-                # Store detailed error info
-                compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
-                  channel_matches, file_channels, matrix_channels, e$message
-                )
-                message("✗ Compensation failed for: ", values$uploaded_files$name[i], " - ", e$message)
-              })
-            } else {
-              # Store compatibility issue details with enhanced matching info
-              compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
-                channel_matches, file_channels, matrix_channels, "Insufficient channel matches"
-              )
-              
-              message("✗ Channel compatibility failed: ", values$uploaded_files$name[i], 
-                     " - ", successful_matches, "/", length(matrix_channels), " channels matched")
-            }
-          }
-          
-          # Show detailed compatibility report if there were issues
-          if (length(compatibility_issues) > 0) {
-            showChannelCompatibilityReport(compatibility_issues, values$uploaded_files$name)
-          }
-          
-          # Store compensated flowset
-          if (length(compensated_files) > 0) {
-            values$compensated_flowset <- flowSet(compensated_files)
-            message("Generated ", length(compensated_files), " compensated experimental files")
-            showNotification(paste("Successfully compensated", length(compensated_files), 
-                                  "experimental files"), type = "message")
-          } else {
-            values$compensated_flowset <- NULL
-            showNotification("No experimental files could be compensated - check channel compatibility", 
-                           type = "warning")
-          }
+      # Framework 2.1: compensating every experimental file involves a
+      # read.FCS() call per file -- previously ran synchronously inside
+      # withProgress(). Now runs inside future_promise() via the shared
+      # computeCompensatedFiles() helper (also used by the manual
+      # "Generate Compensated Experimental Files Now" button below),
+      # eliminating ~130 lines of logic that used to be duplicated between
+      # the two triggers.
+      auto_matrix       <- values$current_matrix
+      auto_uploaded     <- values$uploaded_files
+      auto_experimental <- values$experimental_files
+      
+      showNotification("Generating compensated experimental files...", id = "comp_auto_msg", duration = NULL)
+      
+      future_promise({
+        tryCatch({
+          computeCompensatedFiles(auto_matrix, auto_uploaded$name, auto_uploaded$datapath, auto_experimental)
+        }, error = function(e) {
+          stop(paste("Error generating compensated files:", conditionMessage(e)))
         })
-      }, error = function(e) {
-        showNotification(paste("Error generating compensated files:", e$message), 
-                        type = "error")
+      }) %...>% (function(result) {
+        removeNotification("comp_auto_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
+        if (isTRUE(result$no_experimental_files)) {
+          showNotification("No experimental files selected for compensation", type = "warning")
+          return(invisible(NULL))
+        }
+        if (length(result$compatibility_issues) > 0) {
+          showChannelCompatibilityReport(result$compatibility_issues, auto_uploaded$name)
+        }
+        values$compensated_flowset <- result$compensated_flowset
+        if (result$n_compensated > 0) {
+          showNotification(paste("Successfully compensated", result$n_compensated,
+                                "experimental files"), type = "message")
+        } else {
+          showNotification("No experimental files could be compensated - check channel compatibility",
+                         type = "warning")
+        }
+      }) %...!% (function(err) {
+        removeNotification("comp_auto_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+          return(invisible(NULL))
+        }
+        showNotification(paste("Error generating compensated files:", conditionMessage(err)), type = "error")
       })
     })
+    
     
     # Manual compensation generation for experimental files
     observeEvent(input$generate_compensated, {
@@ -2220,127 +2152,52 @@ compensationModuleServer <- function(id, app_state) {
       # Clear existing compensated files to force regeneration
       values$compensated_flowset <- NULL
       
-      tryCatch({
-        # Apply compensation only to experimental files
-        withProgress(message = "Manually generating compensated experimental files...", value = 0, {
-          compensated_files <- list()
-          comp_obj <- compensation(values$current_matrix)
-          
-          # Filter to only experimental files
-          experimental_file_indices <- which(values$uploaded_files$name %in% values$experimental_files)
-          
-          if (length(experimental_file_indices) == 0) {
-            showNotification("No experimental files selected for compensation", type = "warning")
-            return()
-          }
-          
-          # Track compatibility issues for detailed reporting
-          compatibility_issues <- list()
-          
-          for (i in experimental_file_indices) {
-            incProgress(1/length(experimental_file_indices), 
-                        detail = paste("Processing experimental file:", values$uploaded_files$name[i]))
-            
-            # Read the FCS file
-            ff <- read.FCS(values$uploaded_files$datapath[i], transformation = FALSE)
-            
-            # Enhanced channel compatibility checking with normalization
-            file_channels <- colnames(ff)
-            matrix_channels <- colnames(values$current_matrix)
-            
-            # Use enhanced channel matching
-            channel_matches <- findChannelMatches(matrix_channels, file_channels)
-            
-            # Count successful matches
-            successful_matches <- sum(sapply(channel_matches, function(m) m$found))
-            high_confidence_matches <- sum(sapply(channel_matches, function(m) m$found && m$confidence >= 0.9))
-            
-            # Decide whether to proceed with compensation
-            compensation_threshold <- 0.8  # Require 80% of channels to match
-            
-            if (successful_matches >= length(matrix_channels) * compensation_threshold) {
-              tryCatch({
-                # Create channel mapping for compensation
-                channel_mapping <- character()
-                for (matrix_ch in names(channel_matches)) {
-                  match_info <- channel_matches[[matrix_ch]]
-                  if (match_info$found) {
-                    channel_mapping[matrix_ch] <- match_info$file_channel
-                  }
-                }
-                
-                # Apply compensation with channel mapping if needed
-                if (all(matrix_channels %in% file_channels)) {
-                  # Direct compensation - no mapping needed
-                  ff_comp <- compensate(ff, comp_obj)
-                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
-                  message("✓ Successfully compensated (exact): ", values$uploaded_files$name[i])
-                } else if (length(channel_mapping) >= length(matrix_channels) * compensation_threshold) {
-                  # Compensation with channel mapping
-                  # Create a new compensation object with mapped channel names
-                  mapped_matrix <- values$current_matrix
-                  
-                  # Rename columns in spillover matrix to match file channels
-                  for (matrix_ch in names(channel_mapping)) {
-                    file_ch <- channel_mapping[matrix_ch]
-                    if (matrix_ch %in% colnames(mapped_matrix)) {
-                      colnames(mapped_matrix)[colnames(mapped_matrix) == matrix_ch] <- file_ch
-                    }
-                    if (matrix_ch %in% rownames(mapped_matrix)) {
-                      rownames(mapped_matrix)[rownames(mapped_matrix) == matrix_ch] <- file_ch
-                    }
-                  }
-                  
-                  # Apply compensation with mapped matrix
-                  mapped_comp_obj <- compensation(mapped_matrix)
-                  ff_comp <- compensate(ff, mapped_comp_obj)
-                  compensated_files[[values$uploaded_files$name[i]]] <- ff_comp
-                  
-                  match_quality <- paste0(high_confidence_matches, "/", length(matrix_channels), " high confidence")
-                  message("✓ Successfully compensated (mapped): ", values$uploaded_files$name[i], 
-                         " - ", match_quality)
-                } else {
-                  stop("Insufficient channel matches for compensation")
-                }
-              }, error = function(e) {
-                # Store detailed error info
-                compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
-                  channel_matches, file_channels, matrix_channels, e$message
-                )
-                message("✗ Compensation failed for: ", values$uploaded_files$name[i], " - ", e$message)
-              })
-            } else {
-              # Store compatibility issue details with enhanced matching info
-              compatibility_issues[[values$uploaded_files$name[i]]] <- createCompatibilityIssue(
-                channel_matches, file_channels, matrix_channels, "Insufficient channel matches"
-              )
-              
-              message("✗ Channel compatibility failed: ", values$uploaded_files$name[i], 
-                     " - ", successful_matches, "/", length(matrix_channels), " channels matched")
-            }
-          }
-          
-          # Show detailed compatibility report if there were issues
-          if (length(compatibility_issues) > 0) {
-            showChannelCompatibilityReport(compatibility_issues, values$uploaded_files$name)
-          }
-          
-          # Store compensated flowset
-          if (length(compensated_files) > 0) {
-            values$compensated_flowset <- flowSet(compensated_files)
-            showNotification(paste("Successfully generated", length(compensated_files), 
-                                  "compensated experimental files"), type = "message")
-          } else {
-            values$compensated_flowset <- NULL
-            showNotification("No experimental files could be compensated - check channel compatibility", 
-                           type = "warning")
-          }
+      # Framework 2.1: see the automatic-trigger observer above -- this
+      # button reuses the same computeCompensatedFiles() helper inside
+      # future_promise() instead of duplicating the compensation loop.
+      manual_matrix       <- values$current_matrix
+      manual_uploaded     <- values$uploaded_files
+      manual_experimental <- values$experimental_files
+      
+      showNotification("Generating compensated experimental files...", id = "comp_manual_msg", duration = NULL)
+      
+      future_promise({
+        tryCatch({
+          computeCompensatedFiles(manual_matrix, manual_uploaded$name, manual_uploaded$datapath, manual_experimental)
+        }, error = function(e) {
+          stop(paste("Error generating compensated files:", conditionMessage(e)))
         })
-      }, error = function(e) {
-        showNotification(paste("Error generating compensated files:", e$message), 
-                        type = "error")
+      }) %...>% (function(result) {
+        removeNotification("comp_manual_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "success")
+          return(invisible(NULL))
+        }
+        if (isTRUE(result$no_experimental_files)) {
+          showNotification("No experimental files selected for compensation", type = "warning")
+          return(invisible(NULL))
+        }
+        if (length(result$compatibility_issues) > 0) {
+          showChannelCompatibilityReport(result$compatibility_issues, manual_uploaded$name)
+        }
+        values$compensated_flowset <- result$compensated_flowset
+        if (result$n_compensated > 0) {
+          showNotification(paste("Successfully generated", result$n_compensated,
+                                "compensated experimental files"), type = "message")
+        } else {
+          showNotification("No experimental files could be compensated - check channel compatibility",
+                         type = "warning")
+        }
+      }) %...!% (function(err) {
+        removeNotification("comp_manual_msg")
+        if (isSessionClosedGuard(session_closed)) {
+          logDiscardedAfterSessionEnd(id, outcome = "failure", detail = conditionMessage(err))
+          return(invisible(NULL))
+        }
+        showNotification(paste("Error generating compensated files:", conditionMessage(err)), type = "error")
       })
     })
+    
     
     # Channel compatibility preview
     output$channel_compatibility_preview <- renderText({
@@ -2923,6 +2780,117 @@ createCompatibilityIssue <- function(channel_matches, file_channels, matrix_chan
     unmatched = unmatched_channels,
     error_message = error_message
   ))
+}
+
+# Pure computation for compensating experimental files (Framework 2.1).
+# Deliberately has NO Shiny/reactive dependencies (no showNotification(),
+# no `values$...`, no incProgress()) so it can run unmodified inside
+# future_promise() on a multisession worker. Both the automatic
+# (values$current_matrix observer) and manual (input$generate_compensated)
+# compensation triggers call this same function -- previously they
+# duplicated ~130 lines of identical logic.
+#
+# @param spillover_matrix A spillover matrix (as produced by
+#   flowStats::spillover() or uploaded by the user).
+# @param uploaded_names Character vector of all uploaded file names.
+# @param uploaded_datapaths Character vector of matching file datapaths.
+# @param experimental_files Character vector of file names to compensate.
+# @return A list with `compensated_flowset` (a flowSet, or NULL if nothing
+#   could be compensated), `compatibility_issues` (named list, one entry per
+#   file that failed), and `n_compensated` (integer count of successes).
+computeCompensatedFiles <- function(spillover_matrix, uploaded_names, uploaded_datapaths, experimental_files) {
+  compensated_files <- list()
+  comp_obj <- compensation(spillover_matrix)
+
+  experimental_file_indices <- which(uploaded_names %in% experimental_files)
+  if (length(experimental_file_indices) == 0) {
+    return(list(compensated_flowset = NULL, compatibility_issues = list(),
+                n_compensated = 0L, no_experimental_files = TRUE))
+  }
+
+  compatibility_issues <- list()
+
+  for (i in experimental_file_indices) {
+    ff <- read.FCS(uploaded_datapaths[i], transformation = FALSE)
+
+    # §2.4 [S3]: never apply spillover compensation to a spectral file.
+    # Recorded through the existing compatibility-report path so the skip is visible.
+    if (isTRUE(isSpectralFlowFrame(ff)$is_spectral)) {
+      compatibility_issues[[uploaded_names[i]]] <- createCompatibilityIssue(
+        channel_matches = list(),
+        file_channels   = colnames(ff),
+        matrix_channels = colnames(spillover_matrix),
+        error_message   = "Spectral file detected (>30 channels, no spillover keyword). Spillover compensation was NOT applied - unmix upstream (instrument software or CATALYST) before import."
+      )
+      message("Skipped spectral file (no compensation applied): ", uploaded_names[i])
+      next
+    }
+
+    file_channels <- colnames(ff)
+    matrix_channels <- colnames(spillover_matrix)
+
+    channel_matches <- findChannelMatches(matrix_channels, file_channels)
+
+    successful_matches <- sum(sapply(channel_matches, function(m) m$found))
+    high_confidence_matches <- sum(sapply(channel_matches, function(m) m$found && m$confidence >= 0.9))
+
+    compensation_threshold <- 0.8  # Require 80% of channels to match
+
+    if (successful_matches >= length(matrix_channels) * compensation_threshold) {
+      tryCatch({
+        channel_mapping <- character()
+        for (matrix_ch in names(channel_matches)) {
+          match_info <- channel_matches[[matrix_ch]]
+          if (match_info$found) {
+            channel_mapping[matrix_ch] <- match_info$file_channel
+          }
+        }
+
+        if (all(matrix_channels %in% file_channels)) {
+          ff_comp <- compensate(ff, comp_obj)
+          compensated_files[[uploaded_names[i]]] <- ff_comp
+          message("Successfully compensated (exact): ", uploaded_names[i])
+        } else if (length(channel_mapping) >= length(matrix_channels) * compensation_threshold) {
+          mapped_matrix <- spillover_matrix
+          for (matrix_ch in names(channel_mapping)) {
+            file_ch <- channel_mapping[matrix_ch]
+            if (matrix_ch %in% colnames(mapped_matrix)) {
+              colnames(mapped_matrix)[colnames(mapped_matrix) == matrix_ch] <- file_ch
+            }
+            if (matrix_ch %in% rownames(mapped_matrix)) {
+              rownames(mapped_matrix)[rownames(mapped_matrix) == matrix_ch] <- file_ch
+            }
+          }
+          mapped_comp_obj <- compensation(mapped_matrix)
+          ff_comp <- compensate(ff, mapped_comp_obj)
+          compensated_files[[uploaded_names[i]]] <- ff_comp
+
+          match_quality <- paste0(high_confidence_matches, "/", length(matrix_channels), " high confidence")
+          message("Successfully compensated (mapped): ", uploaded_names[i], " - ", match_quality)
+        } else {
+          stop("Insufficient channel matches for compensation")
+        }
+      }, error = function(e) {
+        compatibility_issues[[uploaded_names[i]]] <<- createCompatibilityIssue(
+          channel_matches, file_channels, matrix_channels, e$message
+        )
+        message("Compensation failed for: ", uploaded_names[i], " - ", e$message)
+      })
+    } else {
+      compatibility_issues[[uploaded_names[i]]] <- createCompatibilityIssue(
+        channel_matches, file_channels, matrix_channels, "Insufficient channel matches"
+      )
+      message("Channel compatibility failed: ", uploaded_names[i],
+             " - ", successful_matches, "/", length(matrix_channels), " channels matched")
+    }
+  }
+
+  list(
+    compensated_flowset = if (length(compensated_files) > 0) flowSet(compensated_files) else NULL,
+    compatibility_issues = compatibility_issues,
+    n_compensated = length(compensated_files),
+    no_experimental_files = FALSE
+  )
 }
 
 # Helper function to show detailed channel compatibility report

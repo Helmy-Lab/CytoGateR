@@ -2,6 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
+.positai
+.posit/
 Data/OneDrive_1_4-16-2025/ExpSummaryForAPI.xml
 Data/OneDrive_1_4-16-2025/01-AdjSplnConA-242 G1.fcs
 Data/OneDrive_1_4-16-2025/01-AdjSplnFMO1 Bcl6 PE-B10.fcs
@@ -157,7 +159,7 @@ test/resultsQC/QCmini.txt
 Flow data for Bioinformatics.csv
 Flow data for Bioinformatics.xlsx
 flowcyto_samples_20250424_032649.csv
-FlowCytoApp/R/modules/batch_analysis_module - mds added.R
-FlowCytoApp/R/modules/processed_data_module - mds added.R
-FlowCytoApp/R/modules/raw_data_module - mds added.R
-FlowCytoApp/R/modules/visualization_module - mds added.R
+batch_analysis_module - mds added.R
+processed_data_module - mds added.R
+raw_data_module - mds added.R
+visualization_module - mds added.R

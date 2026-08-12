@@ -198,46 +198,6 @@ identify_cell_populations <- function(cluster_centers, marker_names,
   
   # Define cell population templates based on this panel
   cell_population_templates <- list(
-    # "CD4+ T cells" = list(
-    #   high = c("CD3", "CD4"),
-    #   medium = c(),
-    #   low = c("FOXP3", "BCL6")
-    # ),
-    # "Regulatory T cells" = list(
-    #   high = c("CD3", "CD4", "FOXP3"),
-    #   medium = c(),
-    #   low = c("BCL6", "CXCR5")
-    # ),
-    # "T follicular helper cells" = list(
-    #   high = c("CD3", "CD4", "CXCR5", "BCL6"),
-    #   medium = c(),
-    #   low = c("FOXP3")
-    # ),
-    # "MHCII+ APCs" = list(
-    #   high = c("MHCII"),
-    #   medium = c(),
-    #   low = c("CD3", "CD4")
-    # ),
-    # "Proliferating T cells" = list(
-    #   high = c("CD3", "KI67"),
-    #   medium = c(),
-    #   low = c()
-    # ),
-    # "Proliferating Tregs" = list(
-    #   high = c("CD3", "CD4", "FOXP3", "KI67"),
-    #   medium = c(),
-    #   low = c("BCL6", "CXCR5")
-    # ),
-    # "Proliferating Tfh cells" = list(
-    #   high = c("CD3", "CD4", "CXCR5", "BCL6", "KI67"),
-    #   medium = c(),
-    #   low = c("FOXP3")
-    # ),
-    # "Activated T cells" = list(
-    #   high = c("CD3", "MHCII"),
-    #   medium = c(),
-    #   low = c()
-    # ),
     "Total T cells" = list(
       high = c("CD3"),
       medium = c(),
