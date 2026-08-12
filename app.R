@@ -42,33 +42,44 @@ ui <- navbarPage(
     "))
   ),
   
-  # Tab for the Settings Module
-  tabPanel("Settings", 
-           settingsModuleUI("settings")
-  ),
+  # §2.6 Tabs follow the analysis workflow. Module servers are called by id in
+  # the server function, so order here is purely presentational.
 
-  # Tab for the Compensation Module
-  tabPanel("Spillover Compensation", 
-           compensationModuleUI("compensation")
-  ),
-  
-  # Tab for the Gating Module
-  tabPanel("Interactive Gating", 
-           gatingModuleUI("gating")
-  ),
-    
-  # Tab for the Raw Data Module
-  tabPanel("Raw Data", 
+  # 1. Data upload, validation, flowAI QC (entry point / landing tab).
+  #    NOTE: single-sample preprocessing + DR/clustering currently also live
+  #    here; a dedicated Preprocessing tab and a unified Analysis tab are the
+  #    Phase B refactor (see spec kit §B2).
+  tabPanel("Data Upload & QC",
            rawDataModuleUI("raw_data")
   ),
 
-  # Tab for the Batch Analysis Module
-  tabPanel("Batch Analysis", 
+  # 2. Spillover compensation.
+  tabPanel("Compensation",
+           compensationModuleUI("compensation")
+  ),
+
+  # 3. Preprocessing (transform / live-dead / normalise / sample cap) is not yet
+  #    a standalone tab; it runs inside "Data Upload & QC" for now (Phase B).
+
+  # 4. Interactive gating.
+  tabPanel("Interactive Gating",
+           gatingModuleUI("gating")
+  ),
+
+  # 5. Analysis: dimensionality reduction + clustering (batch; single-sample
+  #    analysis still in Data Upload & QC pending Phase B consolidation).
+  tabPanel("Analysis",
            batchAnalysisModuleUI("batch_analysis")
   ),
-    # Tab for the Processed Data Module
-  tabPanel("Processed Data", 
+
+  # 6. Results and export.
+  tabPanel("Results & Export",
            processedDataModuleUI("processed_data")
+  ),
+
+  # Utility tab, intentionally last (not part of the pipeline order).
+  tabPanel("Settings",
+           settingsModuleUI("settings")
   )
 )
 

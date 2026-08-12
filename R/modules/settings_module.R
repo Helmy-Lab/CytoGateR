@@ -6,7 +6,31 @@
 settingsModuleUI <- function(id) {
   ns <- NS(id)
   
-  fluidRow(
+  tagList(
+    # §2.5 novelty/comparison panel: static reference table, no reactivity.
+    div(class = "alert alert-light", style = "font-size: 13px;",
+        h4(icon("circle-info"), " How CytoGateR compares"),
+        tags$table(class = "table table-sm",
+          tags$thead(tags$tr(lapply(
+            c("Capability", "CytoGateR v2", "Cyanus", "ShinySOM"), tags$th))),
+          tags$tbody(
+            tags$tr(tags$td("Spillover compensation \u2192 gating \u2192 clustering in one app"),
+                    tags$td("Yes"), tags$td("Partial (expects gated input)"), tags$td("No")),
+            tags$tr(tags$td("Interactive polygon gating"),
+                    tags$td("Yes"), tags$td("No"), tags$td("No")),
+            tags$tr(tags$td("gaussNorm cross-sample normalisation"),
+                    tags$td("Yes"), tags$td("No"), tags$td("No")),
+            tags$tr(tags$td("Clustering methods"),
+                    tags$td("4 (K-means, DBSCAN, FlowSOM, PhenoGraph)"),
+                    tags$td("CATALYST/FlowSOM-based"), tags$td("FlowSOM only")),
+            tags$tr(tags$td("Spectral-file detection + warning"),
+                    tags$td("Yes"), tags$td("No"), tags$td("No")),
+            tags$tr(tags$td("Async computation (no disconnects)"),
+                    tags$td("Yes"), tags$td("No"), tags$td("No"))
+          )
+        )
+    ),
+    fluidRow(
     column(4,
            wellPanel(
              h4("Global Plot Settings", style = "text-align: center; font-weight: bold;"),
@@ -45,6 +69,7 @@ settingsModuleUI <- function(id) {
              uiOutput(ns("preview_container"))
            )
     )
+  )
   )
 }
 
