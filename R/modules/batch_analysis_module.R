@@ -348,14 +348,6 @@ batchAnalysisModuleServer <- function(id, app_state) {
             # QC parameters conditionally rendered
             uiOutput(session$ns("batchQCParametersUI"))
           ),
-          
-          # Gating options - COMMENTED OUT: Using dedicated gating module now
-          # div(class = "parameter-group",
-          #   h5(icon("filter"), "Cell Gating"),
-          #   checkboxInput(session$ns("batchPerformGating"), "Perform Debris/Dead Cell Gating", value = TRUE),
-          #   # Gating parameters conditionally rendered
-          #   uiOutput(session$ns("batchGatingParametersUI"))
-          # )
         )
       }
     })
@@ -412,19 +404,6 @@ batchAnalysisModuleServer <- function(id, app_state) {
         writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE), file)
       }
     )
-    
-    # Gating parameters UI - COMMENTED OUT: Using dedicated gating module now
-    # output$batchGatingParametersUI <- renderUI({
-    #   if (isTRUE(input$batchPerformGating)) {
-    #     tagList(
-    #       textInput(session$ns("batchDebrisGate"), "FSC/SSC Parameters (comma-separated)", 
-    #                 value = "FSC-A,SSC-A"),
-    #       selectInput(session$ns("batchLiveDeadGate"), "Live/Dead Parameter", 
-    #                   choices = c("None", "Live Dead BV570 Violet-610-A"),
-    #                   selected = "None")
-    #     )
-    #   }
-    # })
     
     # Batch dimensionality reduction parameters UI
     output$batchDimReductionParametersUI <- renderUI({

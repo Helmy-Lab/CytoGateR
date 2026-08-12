@@ -73,17 +73,6 @@ rawDataModuleUI <- function(id) {
           uiOutput(ns("markerSelectUI"))
         ),
         
-        # # Spillover Compensation Section
-        # shinydashboard::box(
-        #   title = "Spillover Compensation", status = "warning", solidHeader = TRUE,
-        #   width = 12, collapsible = TRUE, collapsed = TRUE,
-        #   
-        #   checkboxInput(ns("enableCompensation"), "Enable Spillover Compensation", value = FALSE),
-        #   
-        #   # Replace conditionalPanel with server-side rendering
-        #   uiOutput(ns("compensationSettingsUI"))
-        # ),
-        
         # Data Transformation Section
         shinydashboard::box(
           title = "Data Transformation", status = "success", solidHeader = TRUE,
@@ -325,42 +314,6 @@ rawDataModuleUI <- function(id) {
             )
           )
         ),
-        
-        # # Spillover Compensation Analysis
-        # shinydashboard::box(
-        #   title = "Spillover Compensation Analysis", status = "warning", solidHeader = TRUE,
-        #   width = 12, collapsible = TRUE, collapsed = TRUE,
-        #   
-        #   # Replace conditionalPanels with server-side rendering
-        #   uiOutput(ns("compensationAnalysisUI"))
-        # ),
-        
-        # # Live/Dead Analysis
-        # shinydashboard::box(
-        #   title = "Live/Dead Cell Analysis", status = "success", solidHeader = TRUE,
-        #   width = 12, collapsible = TRUE, collapsed = TRUE,
-          
-        #   fluidRow(
-        #     column(8, 
-        #       shinydashboard::box(
-        #         title = "Live/Dead Marker Distribution", status = "info", solidHeader = TRUE,
-        #         width = 12,
-        #         shinycssloaders::withSpinner(plotOutput(ns("liveDeadHistogram"), height = "400px"))
-        #       )
-        #     ),
-        #     column(4, 
-        #       shinydashboard::box(
-        #         title = "Gating Controls", status = "warning", solidHeader = TRUE,
-        #         width = 12,
-        #         uiOutput(ns("liveDeadMarkerUI")),
-        #         # Replace conditionalPanel with server-side rendering
-        #         uiOutput(ns("liveDeadControlsUI"))
-        #       )
-        #     )
-        #   ),
-        #   # Replace conditionalPanel with server-side rendering
-        #   uiOutput(ns("liveDeadScatterUI"))
-        # ),
         
         # Cluster Analysis
         shinydashboard::box(
