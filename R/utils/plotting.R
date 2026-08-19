@@ -609,11 +609,6 @@ get_standard_theme <- function(font_size = 12) {
     )
 }
 
-# Function to get the appropriate color scale based on palette name
-get_color_palette <- function(palette_name) {
-  getDiscreteColorScale(palette_name)
-}
-
 # Spillover compensation plotting functions
 
 # Function to create spillover matrix heatmap

@@ -1288,7 +1288,7 @@ batchAnalysisModuleServer <- function(id, app_state) {
         # Create a ggplot object first
         p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]], text = hover_text)) +
           geom_point(alpha = 0.7, size = point_size/2) +
-          get_color_palette(color_palette) +
+          getDiscreteColorScale(color_palette) +
           labs(
             title = paste(sample$dim_red_method, "Plot Colored by", if(color_by == "Population") "Cell Population" else "Cluster"),
             x = paste(sample$dim_red_method, "1"),
@@ -1541,7 +1541,7 @@ batchAnalysisModuleServer <- function(id, app_state) {
       # Create a base ggplot with correct color palette
       p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]])) +
         geom_point(alpha = 0.7, size = point_size/2) +
-        get_color_palette(color_palette) +
+        getDiscreteColorScale(color_palette) +
         labs(
           title = paste("Clusters from", sample$cluster_results$method),
           x = paste(sample$dim_red_method, "1"),
@@ -1898,7 +1898,7 @@ batchAnalysisModuleServer <- function(id, app_state) {
         # Create base ggplot with correct colors
         p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]])) +
           geom_point(alpha = 0.7, size = point_size/2) +
-          get_color_palette(color_palette) +
+          getDiscreteColorScale(color_palette) +
           labs(
             title = paste("Control:", sample$name),
             x = paste(sample$dim_red_method, "1"),
@@ -2092,7 +2092,7 @@ batchAnalysisModuleServer <- function(id, app_state) {
         # Create base ggplot with correct colors
         p <- ggplot(plot_data, aes(x = dim1, y = dim2, color = .data[[color_by]])) +
           geom_point(alpha = 0.7, size = point_size/2) +
-          get_color_palette(color_palette) +
+          getDiscreteColorScale(color_palette) +
           labs(
             title = paste("Treated:", sample$name),
             x = paste(sample$dim_red_method, "1"),

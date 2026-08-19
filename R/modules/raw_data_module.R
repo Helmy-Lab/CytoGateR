@@ -2286,7 +2286,7 @@ rawDataModuleServer <- function(id, app_state) {
       
       p <- ggplot(plot_data, aes(x = .data[[dim1]], y = .data[[dim2]], color = .data[[color_by]])) +
         geom_point(alpha = 0.7, size = ps$point_size / 2) +
-        get_color_palette(ps$color_palette) +
+        getDiscreteColorScale(ps$color_palette) +
         labs(title = paste("Clusters from", cluster_data$method),
              x     = dim_labels[1],
              y     = dim_labels[2],
