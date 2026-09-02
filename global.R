@@ -249,4 +249,21 @@ create_standard_tooltip <- function(plot, height = 600, width = 800, font_size =
     # Critical for aspect ratio but allow setting to auto
     autosize = TRUE
   )
+  
 }
+
+
+# v2 static plot settings — single source of truth for all renderPlotly calls.
+# A plain function (not reactive) so calling ps$* inside renderPlotly does NOT
+# create a reactive dependency and will NOT trigger cascading re-renders.
+# To change appearance app-wide, edit values here only.
+get_plot_settings <- function() {
+  list(
+    font_size     = 12,
+    point_size    = 1,
+    color_palette = "viridis",
+    width         = 800,
+    height        = 600
+  )
+}
+
